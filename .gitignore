@@ -1,4 +1,3 @@
-*.pdf
 *cache*
 .venv
 dist
