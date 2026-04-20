@@ -1,7 +1,8 @@
+# standard imports
 import logging
 
 
-class Logger:
+class LoggerManager:
     LOG_LEVELS: dict[str, int] = {
         "debug": logging.DEBUG,
         "info": logging.INFO,
