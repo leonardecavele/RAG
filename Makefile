@@ -1,10 +1,11 @@
-# helpers
+# colors
 ESC := \033
 RED := $(ESC)[31m
 GREEN := $(ESC)[32m
 BOLD := $(ESC)[1m
 RESET := $(ESC)[0m
 
+# helpers
 FLAKE8_SUCCESS := printf '%b\n' "$(BOLD)$(GREEN)Success: flake8$(RESET)"
 
 # structure
@@ -27,7 +28,7 @@ MYPY_FLAGS := \
 		--warn-return-any \
 		--disallow-untyped-defs
 
-# rules
+# user rules
 install: uv
 	@$(UV) sync
 
@@ -44,10 +45,11 @@ lint: install
 	@$(FLAKE8) src && $(FLAKE8_SUCCESS)
 	@$(MYPY) src $(MYPY_FLAGS)
 
+# internal rules
 uv:
 	@command -v $(UV) >/dev/null 2>&1 \
-	|| (printf "$(RED)uv not found, please install it first$(RESET)\n" \
+	|| (printf "$(RED)Error: cannot use or find uv$(RESET)\n" \
 	&& exit 1)
 
 # miscellaneous
-.PHONY: install run debug lint lint-strict clean uv
+.PHONY: install run clean debug lint uv
