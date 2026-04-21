@@ -1,9 +1,12 @@
 # standard imports
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # extern imports
 import bm25s
+import chromadb
+from chromadb.utils import embedding_functions
+from chromadb.api.types import EmbeddingFunction, Documents
 from langchain_core.documents import Document
 from pydantic import (
     validate_call, PositiveInt, BaseModel, Field, ValidationError
@@ -29,6 +32,7 @@ class Indexer:
     ) -> None:
         self.output_directory = Path("data/processed")
         self.bm25_directory = self.output_directory / "bm25"
+        self.chroma_directory = self.output_directory / "chroma"
 
         self.directory_path = Path(directory_path)
         self.lm = lm
@@ -63,11 +67,13 @@ class Indexer:
 
     def _split_into_chunks(
         self, files: list[Path]
-    ) -> tuple[list[str], list[dict[str, Any]]]:
+    ) -> tuple[list[str], list[dict[str, Any]], dict[str, Any]]:
 
         chunks_content: list[str] = []
         chunks_metadata: list[dict[str, Any]] = []
+        chunks_ids: dict[str, Any] = {"bm25": [], "chroma": []}
 
+        chunk_id: int = 0
         for file in files:
             try:
                 # load document
@@ -85,32 +91,56 @@ class Indexer:
                 for chunk in file_chunks:
                     chunks_content.append(chunk.page_content)
 
-                    metadata: dict[str, Any] = {
-                        "file_path": str(file),
-                        "first_character_index": index,
-                        "last_character_index": (
-                            index + len(chunk.page_content)
-                        ),
-                    }
                     chunks_metadata.append(
-                        ChunkMetadata(**metadata).model_dump()
+                        ChunkMetadata(
+                            **{
+                                "file_path": str(file),
+                                "first_character_index": index,
+                                "last_character_index": (
+                                    index + len(chunk.page_content)
+                                ),
+                            }
+                        ).model_dump()
                     )
                     index += len(chunk.page_content)
+                    chunks_ids["bm25"].append({"id": f"chunk_{chunk_id}"})
+                    chunks_ids["chroma"].append(f"chunk_{chunk_id}")
+                    chunk_id += 1
 
             except (ValidationError, OSError) as e:
                 raise type(e)(f"Error with {file}: {e}") from e
 
-        return chunks_content, chunks_metadata
+        return chunks_content, chunks_metadata, chunks_ids
 
     def bm25_index(
-        self, chunks_content: list[str], chunks_metadata: list[dict[str, Any]]
+        self, chunks_content: list[str], chunks_ids: list[dict[str, str]]
     ) -> None:
         self.bm25_directory.mkdir(parents=True, exist_ok=True)
 
         corpus_tokens = bm25s.tokenize(chunks_content)
-        retriever = bm25s.BM25(corpus=chunks_metadata)
+        retriever = bm25s.BM25(corpus=chunks_ids)
         retriever.index(corpus_tokens)
         retriever.save(str(self.bm25_directory))
+
+    def chroma_index(
+        self, chunks_content: list[str], chunks_ids: list[str]
+    ) -> None:
+        self.chroma_directory.mkdir(parents=True, exist_ok=True)
+        client = chromadb.PersistentClient(path=str(self.chroma_directory))
+
+        embedding_function = (
+            embedding_functions.SentenceTransformerEmbeddingFunction(
+                model_name="all-MiniLM-L6-v2"
+            )
+        )
+        collection = client.get_or_create_collection(name="chunks")
+        embeddings = embedding_function(chunks_content)
+        collection.add(embeddings=embeddings, ids=chunks_ids)
+
+    def store_chunks(
+        self, chunks_content: list[str], chunks_metadata: list[dict[str, Any]]
+    ) -> None:
+        pass
 
     def index_directory(self) -> None:
         self.lm.logger.debug(
@@ -126,14 +156,27 @@ class Indexer:
         self.lm.logger.debug("Found %d files", len(files))
 
         try:
-            chunks_content, chunks_metadata = self._split_into_chunks(files)
+            chunks_content, chunks_metadata, chunks_ids = (
+                self._split_into_chunks(files)
+            )
         except (ValidationError, OSError) as e:
             raise type(e)(f"Error while chunking: {e}") from e
         self.lm.logger.debug(
             "Split documents into %d chunks", len(chunks_content)
         )
 
-        self.bm25_index(chunks_content, chunks_metadata)
+        self.bm25_index(chunks_content, chunks_ids["bm25"])
         self.lm.logger.debug(
             "Saved BM25 index to '%s'", str(self.bm25_directory)
+        )
+
+        self.chroma_index(chunks_content, chunks_ids["chroma"])
+        self.lm.logger.debug(
+            "Saved Chroma index to '%s'", str(self.chroma_directory)
+        )
+
+        self.store_chunks(chunks_content, chunks_metadata)
+        self.lm.logger.debug(
+            "Stored chunks content and metadata to '%s'",
+            str(self.output_directory)
         )

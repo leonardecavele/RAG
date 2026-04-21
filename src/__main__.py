@@ -37,6 +37,8 @@ class CLI:
         self._init_logger(level)
         self.lm.logger.debug("Searching %r with k=%d", query, k)
 
+        # Ensemble Retriever
+
     def answer(
         self, query: str, k: int = 5, level: str = "error"
     ) -> None:
