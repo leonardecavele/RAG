@@ -11,10 +11,13 @@ from .error import ErrorCode
 from .logger import LoggerManager
 from .indexer import Indexer
 
+DEFAULT_VLLM: str = "vllm-0.10.1"
+
 
 class CLI:
     def index(
-        self, directory_path: str, chunk_size: int = 2000, level: str = "error"
+        self, directory_path: str = DEFAULT_VLLM,
+        chunk_size: int = 2000, level: str = "error"
     ) -> None:
         self._init_logger(level)
         try:
