@@ -20,8 +20,11 @@ class CLI:
         try:
             i = Indexer(directory_path, self.lm, chunk_size)
         except (FileNotFoundError, NotADirectoryError, ValidationError) as e:
+            raise type(e)(f"Error with the arguments: {e}") from e
+        try:
+            i.index_directory()
+        except (OSError, ValidationError) as e:
             raise type(e)(f"Error while indexing: {e}") from e
-        i.index_directory()
 
     def search(
         self, query: str, k: int = 5, level: str = "error"

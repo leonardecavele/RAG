@@ -1,14 +1,13 @@
 # standard imports
-import json
 from pathlib import Path
 from typing import Any
 
 # extern imports
+import bm25s
 from langchain_core.documents import Document
 from pydantic import (
     validate_call, PositiveInt, BaseModel, Field, ValidationError
 )
-import bm25s
 
 # local imports
 from .text_splitter import TextSplitter
@@ -28,6 +27,9 @@ class Indexer:
         lm: LoggerManager,
         chunk_size: PositiveInt = 2000
     ) -> None:
+        self.output_directory = Path("data/processed")
+        self.bm25_directory = self.output_directory / "bm25"
+
         self.directory_path = Path(directory_path)
         self.lm = lm
         self.chunk_size = chunk_size
@@ -100,6 +102,16 @@ class Indexer:
 
         return chunks_content, chunks_metadata
 
+    def bm25_index(
+        self, chunks_content: list[str], chunks_metadata: list[dict[str, Any]]
+    ) -> None:
+        self.bm25_directory.mkdir(parents=True, exist_ok=True)
+
+        corpus_tokens = bm25s.tokenize(chunks_content)
+        retriever = bm25s.BM25(corpus=chunks_metadata)
+        retriever.index(corpus_tokens)
+        retriever.save(str(self.bm25_directory))
+
     def index_directory(self) -> None:
         self.lm.logger.debug(
             "Indexing %s with chunk size %d",
@@ -117,10 +129,11 @@ class Indexer:
             chunks_content, chunks_metadata = self._split_into_chunks(files)
         except (ValidationError, OSError) as e:
             raise type(e)(f"Error while chunking: {e}") from e
-
         self.lm.logger.debug(
             "Split documents into %d chunks", len(chunks_content)
         )
 
-        # build BM25 index here
-        # save chunks and bm25 index here
+        self.bm25_index(chunks_content, chunks_metadata)
+        self.lm.logger.debug(
+            "Saved BM25 index to '%s'", str(self.bm25_directory)
+        )
