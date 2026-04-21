@@ -1,6 +1,7 @@
 # standard imports
 import re
 import json
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +40,8 @@ class Indexer:
         self.output_directory = Path("data/processed")
         self.bm25_directory = self.output_directory / "bm25"
         self.chroma_directory = self.output_directory / "chroma"
-        self.content_path = self.output_directory / "chunks.json"
+        self.chunks_metadata_path = self.output_directory / "chunks.json"
+        self.manifest_path = self.output_directory / "manifest.json"
 
         self.lm = lm
         self.chunk_size = chunk_size
@@ -66,6 +68,18 @@ class Indexer:
                 parsed_extensions.add(e)
 
         return parsed_extensions
+
+    @staticmethod
+    def md5sum(text: str) -> str:
+        return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def file_md5sum(file_path: Path) -> str:
+        hasher = hashlib.md5()
+        with open(file_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
 
     def _collect_files(self) -> list[Path]:
         files: list[Path] = []
@@ -96,52 +110,64 @@ class Indexer:
         chunks_metadata: list[dict[str, Any]] = []
         chunks_ids: dict[str, Any] = {"bm25": [], "chroma": []}
 
-        chunk_id: int = 0
+        manifest: dict[str, Any] = {
+            "files": {
+                "hash": "",
+                "chunks": []
+            }
+        }
+
         for file in files:
-            try:
-                # load document
-                doc: Document = self._load_document(file)
-                self.lm.logger.debug("Loaded '%s' file", str(file))
+            file_id: str = self.md5sum(str(file))
+            file_hash: str = self.file_md5sum(file)
 
-                # split into chunks
-                splitter: TextSplitter = TextSplitter.from_filename(
-                    str(file), chunk_size=self.chunk_size,
+            manifest[file_id]["hash"].append(file_hash)
+
+            # load document
+            doc: Document = self._load_document(file)
+            self.lm.logger.debug("Loaded '%s' file", str(file))
+            # split into chunks
+            splitter: TextSplitter = TextSplitter.from_filename(
+                str(file), chunk_size=self.chunk_size,
+            )
+            file_chunks: list[Document] = splitter.split_documents([doc])
+
+            # add metadata
+            index: int = 0
+            for chunk in file_chunks:
+                content: str = chunk.page_content
+                chunks_content.append(content)
+
+                last_character_index: int = index + len(content)
+
+                chunk_id: str = (
+                    "chunk"
+                    f"_{file_id}"
+                    f"_{index}"
+                    f"_{last_character_index}"
                 )
-                file_chunks: list[Document] = splitter.split_documents([doc])
+                manifest[file_id]["chunks_ids"].append(chunk_id)
 
-                # add metadata
-                index: int = 0
-                for chunk in file_chunks:
-                    content: str = chunk.page_content
-                    chunks_content.append(content)
-
-                    chunks_metadata.append(
-                        ChunkMetadata(
-                            **{
-                                "content": content,
-                                "file_path": str(file),
-                                "first_character_index": index,
-                                "last_character_index": (
-                                    index + len(chunk.page_content)
-                                ),
-                            }
-                        ).model_dump()
-                    )
-                    index += len(chunk.page_content)
-                    chunks_ids["bm25"].append({"id": f"chunk_{chunk_id}"})
-                    chunks_ids["chroma"].append(f"chunk_{chunk_id}")
-                    chunk_id += 1
-
-            except ValidationError as e:
-                raise ValueError(f"Error with {file}: {e}") from e
-            except OSError as e:
-                raise type(e)(f"Error with {file}: {e}") from e
+                chunks_metadata.append(
+                    ChunkMetadata(
+                        **{
+                            "content": content,
+                            "file_path": str(file),
+                            "first_character_index": index,
+                            "last_character_index": last_character_index,
+                        }
+                    ).model_dump()
+                )
+                index += len(chunk.page_content)
+                chunks_ids["bm25"].append({"id": f"{chunk_id}"})
+                chunks_ids["chroma"].append(f"{chunk_id}")
 
         return chunks_content, chunks_metadata, chunks_ids
 
     def bm25_index(
         self, chunks_content: list[str], chunks_ids: list[dict[str, str]]
     ) -> None:
+        self.bm25_directory.rmdir()
         self.bm25_directory.mkdir(parents=True, exist_ok=True)
 
         corpus_tokens = bm25s.tokenize(chunks_content)
@@ -166,10 +192,12 @@ class Indexer:
             batch_content = chunks_content[i:i + MAX_BATCH_SIZE]
             batch_ids = chunks_ids[i:i + MAX_BATCH_SIZE]
             batch_embeddings = embedding_function(batch_content)
-            collection.add(embeddings=batch_embeddings, ids=batch_ids)
+            collection.upsert(embeddings=batch_embeddings, ids=batch_ids)
+
+            # collection.delete(where={"source": str(file)})
 
     def store_chunks(self, chunks_metadata: list[dict[str, Any]]) -> None:
-        with open(self.content_path, "w") as f:
+        with open(self.chunks_metadata_path, "w") as f:
             json.dump(chunks_metadata, f)
 
     def index_directory(self) -> None:
