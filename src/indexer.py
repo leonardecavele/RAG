@@ -1,12 +1,12 @@
 # standard imports
+import re
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 # extern imports
 import bm25s
 import chromadb
 from chromadb.utils import embedding_functions
-from chromadb.api.types import EmbeddingFunction, Documents
 from langchain_core.documents import Document
 from pydantic import (
     validate_call, PositiveInt, BaseModel, Field, ValidationError
@@ -15,6 +15,9 @@ from pydantic import (
 # local imports
 from .text_splitter import TextSplitter
 from .logger import LoggerManager
+
+
+MAX_BATCH_SIZE: int = 5000
 
 
 class ChunkMetadata(BaseModel):
@@ -26,17 +29,19 @@ class ChunkMetadata(BaseModel):
 class Indexer:
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
-        self, directory_path: str,
-        lm: LoggerManager,
-        chunk_size: PositiveInt = 2000
+        self, directory_path: str, lm: LoggerManager,
+        extensions: str = "*", chunk_size: PositiveInt = 2000
     ) -> None:
+        self.directory_path = Path(directory_path)
+
         self.output_directory = Path("data/processed")
         self.bm25_directory = self.output_directory / "bm25"
         self.chroma_directory = self.output_directory / "chroma"
 
-        self.directory_path = Path(directory_path)
         self.lm = lm
         self.chunk_size = chunk_size
+
+        self.extensions = self._parse_extensions(extensions)
 
         if not self.directory_path.exists():
             raise FileNotFoundError(
@@ -48,12 +53,27 @@ class Indexer:
                 f"Path is not a directory: {self.directory_path}"
             )
 
+    @staticmethod
+    def _parse_extensions(extensions: str) -> set[str]:
+        parsed_extensions: set[str] = set()
+
+        for extension in extensions.split(":"):
+            e: str = re.sub(r"[^a-zA-Z0-9]", "", extension).lower()
+            if e:
+                parsed_extensions.add(e)
+
+        return parsed_extensions
+
     def _collect_files(self) -> list[Path]:
         files: list[Path] = []
 
         for path in self.directory_path.rglob("*"):
             if not path.is_file():
                 continue
+            extension: str = path.suffix.removeprefix(".").lower()
+            if extension not in self.extensions:
+                continue
+
             files.append(path)
 
         return files
@@ -107,7 +127,9 @@ class Indexer:
                     chunks_ids["chroma"].append(f"chunk_{chunk_id}")
                     chunk_id += 1
 
-            except (ValidationError, OSError) as e:
+            except ValidationError as e:
+                raise ValueError(f"Error with {file}: {e}") from e
+            except OSError as e:
                 raise type(e)(f"Error with {file}: {e}") from e
 
         return chunks_content, chunks_metadata, chunks_ids
@@ -134,8 +156,12 @@ class Indexer:
             )
         )
         collection = client.get_or_create_collection(name="chunks")
-        embeddings = embedding_function(chunks_content)
-        collection.add(embeddings=embeddings, ids=chunks_ids)
+
+        for i in range(0, len(chunks_content), MAX_BATCH_SIZE):
+            batch_content = chunks_content[i:i + MAX_BATCH_SIZE]
+            batch_ids = chunks_ids[i:i + MAX_BATCH_SIZE]
+            batch_embeddings = embedding_function(batch_content)
+            collection.add(embeddings=batch_embeddings, ids=batch_ids)
 
     def store_chunks(
         self, chunks_content: list[str], chunks_metadata: list[dict[str, Any]]
@@ -159,7 +185,9 @@ class Indexer:
             chunks_content, chunks_metadata, chunks_ids = (
                 self._split_into_chunks(files)
             )
-        except (ValidationError, OSError) as e:
+        except ValidationError as e:
+            raise ValueError(f"Error while chunking: {e}") from e
+        except OSError as e:
             raise type(e)(f"Error while chunking: {e}") from e
         self.lm.logger.debug(
             "Split documents into %d chunks", len(chunks_content)
