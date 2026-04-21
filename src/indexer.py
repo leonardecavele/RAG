@@ -1,5 +1,6 @@
 # standard imports
 import re
+import json
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ MAX_BATCH_SIZE: int = 5000
 
 
 class ChunkMetadata(BaseModel):
+    content: str
     file_path: str
     first_character_index: int = Field(0, ge=0)
     last_character_index: int = Field(0, ge=0)
@@ -37,6 +39,7 @@ class Indexer:
         self.output_directory = Path("data/processed")
         self.bm25_directory = self.output_directory / "bm25"
         self.chroma_directory = self.output_directory / "chroma"
+        self.content_path = self.output_directory / "chunks.json"
 
         self.lm = lm
         self.chunk_size = chunk_size
@@ -109,11 +112,13 @@ class Indexer:
                 # add metadata
                 index: int = 0
                 for chunk in file_chunks:
-                    chunks_content.append(chunk.page_content)
+                    content: str = chunk.page_content
+                    chunks_content.append(content)
 
                     chunks_metadata.append(
                         ChunkMetadata(
                             **{
+                                "content": content,
                                 "file_path": str(file),
                                 "first_character_index": index,
                                 "last_character_index": (
@@ -163,10 +168,9 @@ class Indexer:
             batch_embeddings = embedding_function(batch_content)
             collection.add(embeddings=batch_embeddings, ids=batch_ids)
 
-    def store_chunks(
-        self, chunks_content: list[str], chunks_metadata: list[dict[str, Any]]
-    ) -> None:
-        pass
+    def store_chunks(self, chunks_metadata: list[dict[str, Any]]) -> None:
+        with open(self.content_path, "w") as f:
+            json.dump(chunks_metadata, f)
 
     def index_directory(self) -> None:
         self.lm.logger.debug(
@@ -203,7 +207,7 @@ class Indexer:
             "Saved Chroma index to '%s'", str(self.chroma_directory)
         )
 
-        self.store_chunks(chunks_content, chunks_metadata)
+        self.store_chunks(chunks_metadata)
         self.lm.logger.debug(
             "Stored chunks content and metadata to '%s'",
             str(self.output_directory)
