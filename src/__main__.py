@@ -9,15 +9,19 @@ from pydantic import ValidationError, TypeAdapter, PositiveInt
 # local imports
 from .error import ErrorCode
 from .logger import LoggerManager
-from .index import index
+from .indexer import Indexer
 
 
 class CLI:
     def index(
-        self, path: str, chunk_size: int = 2000, level: str = "error"
+        self, directory_path: str, chunk_size: int = 2000, level: str = "error"
     ) -> None:
         self._init_logger(level)
-        index(path, self.lm, chunk_size)
+        try:
+            i = Indexer(directory_path, self.lm, chunk_size)
+        except (FileNotFoundError, NotADirectoryError, ValidationError) as e:
+            raise type(e)(f"Error while indexing: {e}") from e
+        i.index_directory()
 
     def search(
         self, query: str, k: int = 5, level: str = "error"
