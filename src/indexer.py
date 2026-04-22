@@ -1,5 +1,4 @@
 # standard imports
-import logging
 import re
 import json
 import hashlib
@@ -264,7 +263,7 @@ class Indexer:
             batch_ids = chunks_ids[i:i + MAX_BATCH_SIZE]
 
             batch_embeddings = model.encode(
-                batch_content, show_progress_bar=True, convert_to_numpy=True,
+                batch_content, show_progress_bar=True, convert_to_numpy=True
             )
             collection.add(embeddings=batch_embeddings.tolist(), ids=batch_ids)
 
