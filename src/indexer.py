@@ -71,8 +71,7 @@ class Indexer:
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
         self, directory_path: str, lm: LoggerManager,
-        extensions: str = "*", library_level: str = "warning",
-        chunk_size: PositiveInt = 2000
+        extensions: str = "*", chunk_size: PositiveInt = 2000
     ) -> None:
         self.directory_path = Path(directory_path)
 
@@ -83,7 +82,6 @@ class Indexer:
         self.manifest_path = self.output_directory / "manifest.json"
 
         self.lm = lm
-        self.lm.library_level(library_level)
         self.chunk_size = chunk_size
 
         self.extensions = self._parse_extensions(extensions)

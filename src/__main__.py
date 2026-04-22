@@ -17,15 +17,12 @@ DEFAULT_VLLM: str = "vllm-0.10.1"
 class CLI:
     def index(
         self, directory_path: str = DEFAULT_VLLM,
-        chunk_size: int = 2000, level: str = "error",
-        library_level: str = "warning", extensions: str = "*"
+        chunk_size: int = 2000, extensions: str = "*",
+        level: str = "error", library_level: str = "error"
     ) -> None:
-        self._init_logger(level)
+        self._init_logger(level, library_level)
         try:
-            i = Indexer(
-                directory_path, self.lm, extensions,
-                library_level, chunk_size
-            )
+            i = Indexer(directory_path, self.lm, extensions, chunk_size)
         except ValidationError as e:
             raise ValueError(f"Error with the arguments: {e}") from e
         except (FileNotFoundError, NotADirectoryError) as e:
@@ -38,26 +35,29 @@ class CLI:
             raise type(e)(f"Error while indexing: {e}") from e
 
     def search(
-        self, query: str, k: int = 5, level: str = "error"
+        self, query: str, k: int = 5,
+        level: str = "error", library_level: str = "error"
     ) -> None:
         query = TypeAdapter(str).validate_python(query)
         k = TypeAdapter(PositiveInt).validate_python(k)
-        self._init_logger(level)
+        self._init_logger(level, library_level)
         self.lm.logger.debug("Searching %r with k=%d", query, k)
 
         # Ensemble Retriever
 
     def answer(
-        self, query: str, k: int = 5, level: str = "error"
+        self, query: str, k: int = 5,
+        level: str = "error", library_level: str = "error"
     ) -> None:
         query = TypeAdapter(str).validate_python(query)
         k = TypeAdapter(PositiveInt).validate_python(k)
-        self._init_logger(level)
+        self._init_logger(level, library_level)
         self.lm.logger.debug("Answering %r with k=%d", query, k)
 
-    def _init_logger(self, level: str) -> None:
+    def _init_logger(self, level: str, library_level: str) -> None:
         level = TypeAdapter(str).validate_python(level)
         self.lm: LoggerManager = LoggerManager(level)
+        self.lm.library_level(library_level)
 
 
 def main() -> ErrorCode:
