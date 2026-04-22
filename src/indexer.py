@@ -1,4 +1,5 @@
 # standard imports
+import logging
 import re
 import json
 import hashlib
@@ -70,7 +71,8 @@ class Indexer:
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
         self, directory_path: str, lm: LoggerManager,
-        extensions: str = "*", chunk_size: PositiveInt = 2000
+        extensions: str = "*", library_level: str = "warning",
+        chunk_size: PositiveInt = 2000
     ) -> None:
         self.directory_path = Path(directory_path)
 
@@ -81,6 +83,7 @@ class Indexer:
         self.manifest_path = self.output_directory / "manifest.json"
 
         self.lm = lm
+        self.lm.library_level(library_level)
         self.chunk_size = chunk_size
 
         self.extensions = self._parse_extensions(extensions)
@@ -349,7 +352,9 @@ class Indexer:
         except OSError as e:
             raise type(e)(f"Error while chunking: {e}") from e
         self.lm.logger.debug(
-            "Split documents into %d chunks", len(chunks_content["bm25"])
+            "Split documents into %d new chunks of %d total chunks",
+            len(chunks_content["chroma"]),
+            len(chunks_content["bm25"])
         )
 
         self._bm25_index(chunks_content["bm25"], chunks_ids["bm25"])
