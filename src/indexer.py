@@ -10,7 +10,7 @@ from typing import Any
 # extern imports
 import bm25s
 import chromadb
-from chromadb.utils import embedding_functions
+from sentence_transformers import SentenceTransformer
 from langchain_core.documents import Document
 from pydantic import (
     validate_call, PositiveInt, BaseModel, Field, ValidationError, ConfigDict
@@ -247,11 +247,6 @@ class Indexer:
         self.chroma_directory.mkdir(parents=True, exist_ok=True)
         client = chromadb.PersistentClient(path=str(self.chroma_directory))
 
-        embedding_function = (
-            embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=LLM_MODEL
-            )
-        )
         collection = client.get_or_create_collection(name="chunks")
 
         if self.delete_chunks_ids:
@@ -259,11 +254,16 @@ class Indexer:
                 batch_delete_ids = self.delete_chunks_ids[i:i + MAX_BATCH_SIZE]
                 collection.delete(ids=batch_delete_ids)
 
+        if not chunks_ids:
+            return
+
+        model = SentenceTransformer(LLM_MODEL)
+        embeddings = model.encode(chunks_content, show_progress_bar=True)
+
         for i in range(0, len(chunks_content), MAX_BATCH_SIZE):
-            batch_content = chunks_content[i:i + MAX_BATCH_SIZE]
+            batch_embeddings = embeddings[i:i + MAX_BATCH_SIZE]
             batch_ids = chunks_ids[i:i + MAX_BATCH_SIZE]
-            batch_embeddings = embedding_function(batch_content)
-            collection.add(embeddings=batch_embeddings, ids=batch_ids)
+            collection.add(embeddings=batch_embeddings.tolist(), ids=batch_ids)
 
     def _store_chunks(self, chunks_metadata: list[dict[str, Any]]) -> None:
         self.chunks_metadata_path.parent.mkdir(parents=True, exist_ok=True)
