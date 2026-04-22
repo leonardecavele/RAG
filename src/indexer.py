@@ -2,6 +2,7 @@
 import re
 import json
 import hashlib
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -38,10 +39,10 @@ class CachedFile(BaseModel):
 class Manifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    chunk_size: PositiveInt = 0
-    extensions: list[str] = Field(default_factory=lambda: [])
+    chunk_size: int = Field(0, ge=0)
+    extensions: list[str] = Field(default_factory=list)
     files_by_extensions: dict[str, dict[str, CachedFile]] = Field(
-        default_factory=lambda: {}
+        default_factory=dict
     )
 
     @classmethod
@@ -92,6 +93,9 @@ class Indexer:
 
     @staticmethod
     def _parse_extensions(extensions: str) -> set[str]:
+        if extensions.strip() == "*":
+            return {"*"}
+
         parsed_extensions: set[str] = set()
 
         for extension in extensions.split(":"):
@@ -120,7 +124,7 @@ class Indexer:
             if not path.is_file():
                 continue
             extension: str = path.suffix.removeprefix(".").lower()
-            if extension not in self.extensions:
+            if "*" not in self.extensions and extension not in self.extensions:
                 continue
 
             files.append(path)
@@ -136,9 +140,9 @@ class Indexer:
 
     def _split_into_chunks(
         self, files: list[Path]
-    ) -> tuple[list[str], list[dict[str, Any]], dict[str, Any]]:
+    ) -> tuple[dict[str, list[str]], list[dict[str, Any]], dict[str, Any]]:
 
-        chunks_content: list[str] = []
+        chunks_content: dict[str, list[str]] = {"bm25": [], "chroma": []}
         chunks_metadata: list[dict[str, Any]] = []
         chunks_ids: dict[str, Any] = {"bm25": [], "chroma": []}
 
@@ -149,7 +153,7 @@ class Indexer:
         for file in files:
             file_id: str = self._md5sum(str(file))
             file_hash: str = self._file_md5sum(file)
-            file_suffix: str = file.suffix
+            file_suffix: str = file.suffix.removeprefix(".").lower()
 
             manifest_files = self.manifest.files_by_extensions.setdefault(
                 file_suffix, {}
@@ -193,7 +197,7 @@ class Indexer:
             index: int = 0
             for chunk in file_chunks:
                 content: str = chunk.page_content
-                chunks_content.append(content)
+                chunks_content["bm25"].append(content)
 
                 last_character_index: int = index + len(content)
 
@@ -220,6 +224,7 @@ class Indexer:
                 chunks_ids["bm25"].append({"id": f"{chunk_id}"})
                 # control this
                 if empty_manifest_ids:
+                    chunks_content["chroma"].append(content)
                     chunks_ids["chroma"].append(f"{chunk_id}")
 
         return chunks_content, chunks_metadata, chunks_ids
@@ -227,7 +232,8 @@ class Indexer:
     def _bm25_index(
         self, chunks_content: list[str], chunks_ids: list[dict[str, str]]
     ) -> None:
-        self.bm25_directory.rmdir()
+        if self.bm25_directory.exists():
+            shutil.rmtree(self.bm25_directory)
         self.bm25_directory.mkdir(parents=True, exist_ok=True)
 
         corpus_tokens = bm25s.tokenize(chunks_content)
@@ -272,6 +278,7 @@ class Indexer:
             json.dump(self.manifest.model_dump(mode="json"), f, indent=4)
 
     def _load_manifest(self) -> None:
+        self.delete_chunks_ids = []
         self.manifest = Manifest.from_file(self.manifest_path)
 
         if self.manifest.chunk_size != self.chunk_size:
@@ -279,11 +286,11 @@ class Indexer:
                 for file in files.values():
                     self.delete_chunks_ids.extend(file.chunks_ids)
 
-            self.manifest = Manifest()
+            self.manifest = Manifest(chunk_size=self.chunk_size)
             return
 
         for e in self.manifest.files_by_extensions.copy():
-            if e not in self.extensions:
+            if "*" not in self.extensions and e not in self.extensions:
                 for file in self.manifest.files_by_extensions[e].values():
                     self.delete_chunks_ids.extend(file.chunks_ids)
 
@@ -296,7 +303,7 @@ class Indexer:
 
             for file_id in self.manifest.files_by_extensions[e].copy():
                 file = self.manifest.files_by_extensions[e][file_id]
-                path = self.directory_path / file.file_path
+                path = Path(file.file_path)
 
                 if not path.exists():
                     self.delete_chunks_ids.extend(file.chunks_ids)
@@ -335,15 +342,15 @@ class Indexer:
         except OSError as e:
             raise type(e)(f"Error while chunking: {e}") from e
         self.lm.logger.debug(
-            "Split documents into %d chunks", len(chunks_content)
+            "Split documents into %d chunks", len(chunks_content["bm25"])
         )
 
-        self._bm25_index(chunks_content, chunks_ids["bm25"])
+        self._bm25_index(chunks_content["bm25"], chunks_ids["bm25"])
         self.lm.logger.debug(
             "Saved BM25 index to '%s'", str(self.bm25_directory)
         )
 
-        self._chroma_index(chunks_content, chunks_ids["chroma"])
+        self._chroma_index(chunks_content["chroma"], chunks_ids["chroma"])
         self.lm.logger.debug(
             "Saved Chroma index to '%s'", str(self.chroma_directory)
         )
