@@ -20,10 +20,11 @@ from .text_splitter import TextSplitter
 from .logger import LoggerManager
 
 
-MAX_BATCH_SIZE: int = 5000
+MAX_BATCH_SIZE: int = 1024
 LLM_MODEL: str = (
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     # "intfloat/multilingual-e5-small"
+    #
 )
 
 
@@ -49,6 +50,7 @@ class Manifest(BaseModel):
     files_by_extensions: dict[str, dict[str, CachedFile]] = Field(
         default_factory=dict
     )
+    idiot: bool = False
 
     @classmethod
     def from_file(cls, file_path: Path) -> "Manifest":
@@ -69,8 +71,8 @@ class Manifest(BaseModel):
 class Indexer:
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
-        self, directory_path: str, lm: LoggerManager,
-        extensions: str = "*", chunk_size: PositiveInt = 2000
+        self, directory_path: str, lm: LoggerManager, extensions: str = "*",
+        chunk_size: PositiveInt = 2000, idiot: bool = False
     ) -> None:
         self.directory_path = Path(directory_path)
 
@@ -82,6 +84,7 @@ class Indexer:
 
         self.lm = lm
         self.chunk_size = chunk_size
+        self.idiot = idiot
 
         self.extensions = self._parse_extensions(extensions)
         self.delete_chunks_ids: list[str] = []
@@ -291,8 +294,17 @@ class Indexer:
                 for file in files.values():
                     self.delete_chunks_ids.extend(file.chunks_ids)
 
-            self.manifest = Manifest(chunk_size=self.chunk_size)
+            self.manifest = Manifest(
+                chunk_size=self.chunk_size, idiot=self.idiot
+            )
             return
+
+        if self.manifest.idiot is True and self.idiot is False:
+            for files in self.manifest.files_by_extensions.values():
+                for file in files.values():
+                    file.chunks_ids = set()
+
+            self.manifest.idiot = False
 
         for e in self.manifest.files_by_extensions.copy():
             if "*" not in self.extensions and e not in self.extensions:
@@ -362,10 +374,11 @@ class Indexer:
             "Saved BM25 index to '%s'", str(self.bm25_directory)
         )
 
-        self._chroma_index(chunks_content["chroma"], chunks_ids["chroma"])
-        self.lm.logger.debug(
-            "Saved Chroma index to '%s'", str(self.chroma_directory)
-        )
+        if not self.idiot:
+            self._chroma_index(chunks_content["chroma"], chunks_ids["chroma"])
+            self.lm.logger.debug(
+                "Saved Chroma index to '%s'", str(self.chroma_directory)
+            )
 
         self._store_chunks(chunks_metadata)
         self.lm.logger.debug(

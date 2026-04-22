@@ -17,12 +17,12 @@ DEFAULT_VLLM: str = "vllm-0.10.1"
 class CLI:
     def index(
         self, directory_path: str = DEFAULT_VLLM,
-        chunk_size: int = 2000, extensions: str = "*",
+        chunk_size: int = 2000, extensions: str = "*", idiot: bool = False,
         level: str = "error", library_level: str = "error"
     ) -> None:
         self._init_logger(level, library_level)
         try:
-            i = Indexer(directory_path, self.lm, extensions, chunk_size)
+            i = Indexer(directory_path, self.lm, extensions, chunk_size, idiot)
         except ValidationError as e:
             raise ValueError(f"Error with the arguments: {e}") from e
         except (FileNotFoundError, NotADirectoryError) as e:
