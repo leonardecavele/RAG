@@ -258,11 +258,14 @@ class Indexer:
             return
 
         model = SentenceTransformer(LLM_MODEL)
-        embeddings = model.encode(chunks_content, show_progress_bar=True)
-
+        self.lm.logger.debug("Embedding model device: %s", model.device)
         for i in range(0, len(chunks_content), MAX_BATCH_SIZE):
-            batch_embeddings = embeddings[i:i + MAX_BATCH_SIZE]
+            batch_content = chunks_content[i:i + MAX_BATCH_SIZE]
             batch_ids = chunks_ids[i:i + MAX_BATCH_SIZE]
+
+            batch_embeddings = model.encode(
+                batch_content, show_progress_bar=True, convert_to_numpy=True,
+            )
             collection.add(embeddings=batch_embeddings.tolist(), ids=batch_ids)
 
     def _store_chunks(self, chunks_metadata: list[dict[str, Any]]) -> None:
