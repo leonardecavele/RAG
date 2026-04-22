@@ -21,6 +21,7 @@ from .logger import LoggerManager
 
 
 MAX_BATCH_SIZE: int = 5000
+LLM_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 
 class ChunkMetadata(BaseModel):
@@ -247,7 +248,7 @@ class Indexer:
 
         embedding_function = (
             embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name="all-MiniLM-L6-v2"
+                model_name=LLM_MODEL
             )
         )
         collection = client.get_or_create_collection(name="chunks")
