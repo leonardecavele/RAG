@@ -172,9 +172,7 @@ class Indexer:
                 manifest_file.file_hash is not None
                 and manifest_file.file_hash != file_hash
             ):
-                self.delete_chunks_ids.extend(
-                    manifest_file.chunks_ids
-                )
+                self.delete_chunks_ids.extend(manifest_file.chunks_ids)
                 manifest_file.chunks_ids = set()
 
             manifest_file.file_path = str(file)
