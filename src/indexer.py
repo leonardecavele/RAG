@@ -21,7 +21,10 @@ from .logger import LoggerManager
 
 
 MAX_BATCH_SIZE: int = 5000
-LLM_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+LLM_MODEL: str = (
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    # "intfloat/multilingual-e5-small"
+)
 
 
 class ChunkMetadata(BaseModel):
@@ -41,6 +44,7 @@ class Manifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     chunk_size: int = Field(0, ge=0)
+    llm_model: str = LLM_MODEL
     extensions: list[str] = Field(default_factory=list)
     files_by_extensions: dict[str, dict[str, CachedFile]] = Field(
         default_factory=dict
@@ -146,10 +150,6 @@ class Indexer:
         chunks_content: dict[str, list[str]] = {"bm25": [], "chroma": []}
         chunks_metadata: list[dict[str, Any]] = []
         chunks_ids: dict[str, Any] = {"bm25": [], "chroma": []}
-
-        for e in self.extensions:
-            if e not in self.manifest.extensions:
-                self.manifest.extensions.append(e)
 
         for file in files:
             file_id: str = self._md5sum(str(file))
@@ -280,7 +280,10 @@ class Indexer:
         self.delete_chunks_ids = []
         self.manifest = Manifest.from_file(self.manifest_path)
 
-        if self.manifest.chunk_size != self.chunk_size:
+        if (
+            self.manifest.chunk_size != self.chunk_size
+            or self.manifest.llm_model != LLM_MODEL
+        ):
             for files in self.manifest.files_by_extensions.values():
                 for file in files.values():
                     self.delete_chunks_ids.extend(file.chunks_ids)
@@ -331,6 +334,11 @@ class Indexer:
             raise type(e)(f"Error while collecting files: {e}") from e
 
         self.lm.logger.debug("Found %d files", len(files))
+
+        # add missing extensions to the manifest
+        for ext in self.extensions:
+            if ext not in self.manifest.extensions:
+                self.manifest.extensions.append(ext)
 
         try:
             chunks_content, chunks_metadata, chunks_ids = (
