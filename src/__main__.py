@@ -22,7 +22,13 @@ class CLI:
     ) -> None:
         self._init_logger(level, library_level)
         try:
-            i = Indexer(directory_path, self.lm, extensions, chunk_size, idiot)
+            i = Indexer(
+                directory_path=directory_path,
+                lm=self.lm,
+                extensions=extensions,
+                chunk_size=chunk_size,
+                idiot=idiot,
+            )
         except ValidationError as e:
             raise ValueError(f"Error with the arguments: {e}") from e
         except (FileNotFoundError, NotADirectoryError) as e:

@@ -24,7 +24,6 @@ MAX_BATCH_SIZE: int = 1024
 LLM_MODEL: str = (
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     # "intfloat/multilingual-e5-small"
-    #
 )
 
 
@@ -50,7 +49,6 @@ class Manifest(BaseModel):
     files_by_extensions: dict[str, dict[str, CachedFile]] = Field(
         default_factory=dict
     )
-    idiot: bool = False
 
     @classmethod
     def from_file(cls, file_path: Path) -> "Manifest":
@@ -154,6 +152,8 @@ class Indexer:
         chunks_metadata: list[dict[str, Any]] = []
         chunks_ids: dict[str, Any] = {"bm25": [], "chroma": []}
 
+        chroma_index_missing: bool = not self.chroma_directory.exists()
+
         for file in files:
             file_id: str = self._md5sum(str(file))
             file_hash: str = self._file_md5sum(file)
@@ -166,9 +166,7 @@ class Indexer:
 
             if manifest_file is None:
                 manifest_file = CachedFile(
-                    file_path=str(file),
-                    file_hash=file_hash,
-                    chunks_ids=set(),
+                    file_path=str(file), file_hash=file_hash, chunks_ids=set()
                 )
                 manifest_files[file_id] = manifest_file
 
@@ -186,16 +184,14 @@ class Indexer:
             if not manifest_file.chunks_ids:
                 empty_manifest_ids = True
 
-            # load document
             doc: Document = self._load_document(file)
             self.lm.logger.debug("Loaded '%s' file", str(file))
-            # split into chunks
+
             splitter: TextSplitter = TextSplitter.from_filename(
                 str(file), chunk_size=self.chunk_size,
             )
             file_chunks: list[Document] = splitter.split_documents([doc])
 
-            # add metadata
             index: int = 0
             for chunk in file_chunks:
                 content: str = chunk.page_content
@@ -209,6 +205,7 @@ class Indexer:
                     f"_{index}"
                     f"_{last_character_index}"
                 )
+
                 if empty_manifest_ids:
                     manifest_file.chunks_ids.add(chunk_id)
 
@@ -222,10 +219,14 @@ class Indexer:
                         }
                     ).model_dump()
                 )
+
                 index += len(chunk.page_content)
                 chunks_ids["bm25"].append({"id": f"{chunk_id}"})
-                # control this
-                if empty_manifest_ids:
+
+                if (
+                    not self.idiot
+                    and (empty_manifest_ids or chroma_index_missing)
+                ):
                     chunks_content["chroma"].append(content)
                     chunks_ids["chroma"].append(f"{chunk_id}")
 
@@ -294,17 +295,8 @@ class Indexer:
                 for file in files.values():
                     self.delete_chunks_ids.extend(file.chunks_ids)
 
-            self.manifest = Manifest(
-                chunk_size=self.chunk_size, idiot=self.idiot
-            )
+            self.manifest = Manifest(chunk_size=self.chunk_size)
             return
-
-        if self.manifest.idiot is True and self.idiot is False:
-            for files in self.manifest.files_by_extensions.values():
-                for file in files.values():
-                    file.chunks_ids = set()
-
-            self.manifest.idiot = False
 
         for e in self.manifest.files_by_extensions.copy():
             if "*" not in self.extensions and e not in self.extensions:
