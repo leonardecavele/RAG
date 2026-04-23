@@ -1,7 +1,6 @@
 # standard imports
 import re
 import json
-import hashlib
 import shutil
 from pathlib import Path
 from typing import Any
@@ -12,12 +11,14 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 from langchain_core.documents import Document
 from pydantic import (
-    validate_call, PositiveInt, BaseModel, Field, ValidationError, ConfigDict
+    validate_call, PositiveInt, BaseModel,
+    Field, ValidationError, ConfigDict
 )
 
 # local imports
 from .text_splitter import TextSplitter
 from .logger import LoggerManager
+from .hash import md5sum, file_md5sum
 from .paths import (
     OUTPUT_DIRECTORY, BM25_DIRECTORY, CHROMA_DIRECTORY,
     CHUNKS_METADATA_PATH, MANIFEST_PATH
@@ -54,20 +55,110 @@ class Manifest(BaseModel):
         default_factory=dict
     )
 
-    @classmethod
-    def from_file(cls, file_path: Path) -> "Manifest":
+    @staticmethod
+    def existing_manifest_data() -> dict[str, Any]:
         manifest_data = {}
 
         try:
-            if file_path.exists():
-                with open(file_path, "r") as f:
-                    manifest_data = json.load(f)
-                if not isinstance(manifest_data, dict):
-                    pass
-                    # to do
+            with open(MANIFEST_PATH, "r") as f:
+                manifest_data = json.load(f)
+            if not isinstance(manifest_data, dict):
+                pass  # to do
         except json.JSONDecodeError as e:
             raise e from e  # to do
-        return cls(**manifest_data)
+
+        return manifest_data
+
+    def _remove_extensions(self, extensions: set[str]) -> list[str]:
+        delete_chunks_ids: list[str] = []
+
+        for ext in list(self.files_by_extensions.keys()):
+            if "*" not in extensions and ext not in extensions:
+                for cached_file in self.files_by_extensions[ext].values():
+                    delete_chunks_ids.extend(cached_file.chunks_ids)
+
+                del self.files_by_extensions[ext]
+
+                if ext in self.extensions:
+                    self.extensions.remove(ext)
+
+        return delete_chunks_ids
+
+    def _remove_missing_files(self) -> list[str]:
+        delete_chunks_ids: list[str] = []
+
+        for ext in list(self.files_by_extensions.keys()):
+            for file_id in list(self.files_by_extensions[ext].keys()):
+                cached_file = self.files_by_extensions[ext][file_id]
+                path = Path(cached_file.file_path)
+
+                if not path.exists():
+                    delete_chunks_ids.extend(cached_file.chunks_ids)
+                    del self.files_by_extensions[ext][file_id]
+
+            if not self.files_by_extensions[ext]:
+                del self.files_by_extensions[ext]
+
+                if ext in self.extensions:
+                    self.extensions.remove(ext)
+
+        return delete_chunks_ids
+
+    @classmethod
+    def load(
+        cls, chunk_size: int, extensions: set[str]
+    ) -> tuple["Manifest", list[str]]:
+        if not MANIFEST_PATH.exists():
+            return cls(chunk_size=chunk_size, llm_model=LLM_MODEL), []
+
+        manifest = cls(**cls.existing_manifest_data())
+        delete_chunks_ids: list[str] = []
+
+        if (
+            manifest.chunk_size != chunk_size
+            or manifest.llm_model != LLM_MODEL
+        ):
+            for files_by_id in manifest.files_by_extensions.values():
+                for cached_file in files_by_id.values():
+                    delete_chunks_ids.extend(cached_file.chunks_ids)
+
+            return (
+                cls(chunk_size=chunk_size, llm_model=LLM_MODEL),
+                delete_chunks_ids
+            )
+
+        delete_chunks_ids.extend(manifest._remove_extensions(extensions))
+        delete_chunks_ids.extend(manifest._remove_missing_files())
+
+        return manifest, delete_chunks_ids
+
+    def sync_files(self, files: list[Path]) -> list[str]:
+        delete_chunks_ids: list[str] = []
+
+        for file in files:
+            file_id: str = md5sum(str(file))
+            file_hash: str = file_md5sum(file)
+            file_suffix: str = file.suffix.removeprefix(".").lower()
+
+            manifest_files = self.files_by_extensions.setdefault(file_suffix, {})
+            manifest_file = manifest_files.get(file_id)
+
+            if manifest_file is None:
+                manifest_file = CachedFile(
+                    file_path=str(file),
+                    file_hash=file_hash,
+                    chunks_ids=set(),
+                )
+                manifest_files[file_id] = manifest_file
+
+            if manifest_file.file_hash != file_hash:
+                delete_chunks_ids.extend(manifest_file.chunks_ids)
+                manifest_file.chunks_ids = set()
+
+            manifest_file.file_path = str(file)
+            manifest_file.file_hash = file_hash
+
+        return delete_chunks_ids
 
 
 class Indexer:
@@ -109,18 +200,6 @@ class Indexer:
 
         return parsed_extensions
 
-    @staticmethod
-    def _md5sum(text: str) -> str:
-        return hashlib.md5(text.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def _file_md5sum(file_path: Path) -> str:
-        hasher = hashlib.md5()
-        with open(file_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hasher.update(chunk)
-        return hasher.hexdigest()
-
     def _collect_files(self) -> list[Path]:
         files: list[Path] = []
 
@@ -144,43 +223,14 @@ class Indexer:
 
     def _split_into_chunks(
         self, files: list[Path]
-    ) -> tuple[dict[str, list[str]], list[dict[str, Any]], dict[str, Any]]:
+    ) -> tuple[list[str], list[dict[str, Any]], list[str]]:
 
-        chunks_content: dict[str, list[str]] = {"bm25": [], "chroma": []}
+        chunks_content: list[str] = []
         chunks_metadata: list[dict[str, Any]] = []
-        chunks_ids: dict[str, Any] = {"bm25": [], "chroma": []}
-
-        chroma_index_missing: bool = not CHROMA_DIRECTORY.exists()
+        chunks_ids: list[str] = []
 
         for file in files:
-            file_id: str = self._md5sum(str(file))
-            file_hash: str = self._file_md5sum(file)
-            file_suffix: str = file.suffix.removeprefix(".").lower()
-
-            manifest_files = self.manifest.files_by_extensions.setdefault(
-                file_suffix, {}
-            )
-            manifest_file = manifest_files.get(file_id)
-
-            if manifest_file is None:
-                manifest_file = CachedFile(
-                    file_path=str(file), file_hash=file_hash, chunks_ids=set()
-                )
-                manifest_files[file_id] = manifest_file
-
-            if (
-                manifest_file.file_hash is not None
-                and manifest_file.file_hash != file_hash
-            ):
-                self.delete_chunks_ids.extend(manifest_file.chunks_ids)
-                manifest_file.chunks_ids = set()
-
-            manifest_file.file_path = str(file)
-            manifest_file.file_hash = file_hash
-
-            empty_manifest_ids: bool = False
-            if not manifest_file.chunks_ids:
-                empty_manifest_ids = True
+            file_id: str = md5sum(str(file))
 
             doc: Document = self._load_document(file)
             self.lm.logger.debug("Loaded '%s' file", str(file))
@@ -190,43 +240,48 @@ class Indexer:
             )
             file_chunks: list[Document] = splitter.split_documents([doc])
 
-            index: int = 0
+            source_text: str = doc.page_content
+            search_from: int = 0
+
             for chunk in file_chunks:
                 content: str = chunk.page_content
-                chunks_content["bm25"].append(content)
+                chunks_content.append(content)
 
-                last_character_index: int = index + len(content)
+                first_character_index: int | None = (
+                    chunk.metadata.get("start_index")
+                )
+
+                if first_character_index is None:
+                    first_character_index = (
+                        source_text.find(content, search_from)
+                    )
+                    if first_character_index == -1:
+                        raise ValueError(
+                            f"Unable to locate chunk in source file: {file}"
+                        )
+
+                last_character_index: int = (
+                    first_character_index + len(content)
+                )
 
                 chunk_id: str = (
                     "chunk"
                     f"_{file_id}"
-                    f"_{index}"
+                    f"_{first_character_index}"
                     f"_{last_character_index}"
                 )
 
-                if empty_manifest_ids:
-                    manifest_file.chunks_ids.add(chunk_id)
-
                 chunks_metadata.append(
                     ChunkMetadata(
-                        **{
-                            "content": content,
-                            "file_path": str(file),
-                            "first_character_index": index,
-                            "last_character_index": last_character_index,
-                        }
+                        content=content,
+                        file_path=str(file),
+                        first_character_index=first_character_index,
+                        last_character_index=last_character_index,
                     ).model_dump()
                 )
 
-                index += len(chunk.page_content)
-                chunks_ids["bm25"].append({"id": f"{chunk_id}"})
-
-                if (
-                    not self.idiot
-                    and (empty_manifest_ids or chroma_index_missing)
-                ):
-                    chunks_content["chroma"].append(content)
-                    chunks_ids["chroma"].append(f"{chunk_id}")
+                chunks_ids.append(chunk_id)
+                search_from = first_character_index + 1
 
         return chunks_content, chunks_metadata, chunks_ids
 
@@ -281,46 +336,43 @@ class Indexer:
         with open(MANIFEST_PATH, "w") as f:
             json.dump(self.manifest.model_dump(mode="json"), f, indent=4)
 
-    def _load_manifest(self) -> None:
-        self.delete_chunks_ids = []
-        self.manifest = Manifest.from_file(MANIFEST_PATH)
+    def _chroma_filter(
+        self, chunks_content: list[str],
+        chunks_metadata: list[dict[str, Any]], chunks_ids: list[str],
+    ) -> tuple[list[str], list[str]]:
+        chroma_chunks_content: list[str] = []
+        chroma_chunks_ids: list[str] = []
 
-        if (
-            self.manifest.chunk_size != self.chunk_size
-            or self.manifest.llm_model != LLM_MODEL
+        chroma_index_missing: bool = not CHROMA_DIRECTORY.exists()
+
+        for content, metadata, chunk_id in zip(
+            chunks_content,
+            chunks_metadata,
+            chunks_ids,
         ):
-            for files in self.manifest.files_by_extensions.values():
-                for file in files.values():
-                    self.delete_chunks_ids.extend(file.chunks_ids)
+            file_path = Path(metadata["file_path"])
+            file_id: str = md5sum(str(file_path))
+            file_suffix: str = file_path.suffix.removeprefix(".").lower()
 
-            self.manifest = Manifest(chunk_size=self.chunk_size)
-            return
+            manifest_files = self.manifest.files_by_extensions.get(
+                file_suffix, {}
+            )
+            manifest_file = manifest_files.get(file_id)
 
-        for e in self.manifest.files_by_extensions.copy():
-            if "*" not in self.extensions and e not in self.extensions:
-                for file in self.manifest.files_by_extensions[e].values():
-                    self.delete_chunks_ids.extend(file.chunks_ids)
-
-                del self.manifest.files_by_extensions[e]
-
-                if e in self.manifest.extensions:
-                    self.manifest.extensions.remove(e)
-
+            if manifest_file is None:
                 continue
 
-            for file_id in self.manifest.files_by_extensions[e].copy():
-                file = self.manifest.files_by_extensions[e][file_id]
-                path = Path(file.file_path)
+            needs_chroma: bool = (
+                chroma_index_missing
+                or chunk_id not in manifest_file.chunks_ids
+            )
 
-                if not path.exists():
-                    self.delete_chunks_ids.extend(file.chunks_ids)
-                    del self.manifest.files_by_extensions[e][file_id]
+            if needs_chroma:
+                chroma_chunks_content.append(content)
+                chroma_chunks_ids.append(chunk_id)
+                manifest_file.chunks_ids.add(chunk_id)
 
-            if not self.manifest.files_by_extensions[e]:
-                del self.manifest.files_by_extensions[e]
-
-                if e in self.manifest.extensions:
-                    self.manifest.extensions.remove(e)
+        return chroma_chunks_content, chroma_chunks_ids
 
     def index_directory(self) -> None:
         self.lm.logger.debug(
@@ -328,23 +380,32 @@ class Indexer:
             str(self.directory_path), self.chunk_size
         )
 
-        try:
-            self._load_manifest()
-        except Exception as e:  # to do
-            raise e
+        # load or create manifest
+        self.manifest, self.delete_chunks_ids = (
+            Manifest.load(self.chunk_size, self.extensions)
+        )
+        chroma_deleted_chunks_count: int = len(self.delete_chunks_ids)
 
+        # add missing extensions to the manifest
+        self.manifest.extensions.extend(
+            [ext for ext in self.extensions
+             if ext not in self.manifest.extensions]
+        )
+
+        # collect corresponding files
         try:
             files: list[Path] = self._collect_files()
         except OSError as e:
             raise type(e)(f"Error while collecting files: {e}") from e
-
         self.lm.logger.debug("Found %d files", len(files))
 
-        # add missing extensions to the manifest
-        for ext in self.extensions:
-            if ext not in self.manifest.extensions:
-                self.manifest.extensions.append(ext)
+        # sync manifest files
+        self.delete_chunks_ids.extend(self.manifest.sync_files(files))
+        chroma_updated_chunks_count: int = (
+            len(self.delete_chunks_ids) - chroma_deleted_chunks_count
+        )
 
+        # chunk files
         try:
             chunks_content, chunks_metadata, chunks_ids = (
                 self._split_into_chunks(files)
@@ -353,29 +414,46 @@ class Indexer:
             raise ValueError(f"Error while chunking: {e}") from e
         except OSError as e:
             raise type(e)(f"Error while chunking: {e}") from e
-        self.lm.logger.debug(
-            "Split documents into %d new chunks of %d total chunks",
-            len(chunks_content["chroma"]),
-            len(chunks_content["bm25"])
-        )
 
-        self._bm25_index(chunks_content["bm25"], chunks_ids["bm25"])
-        self.lm.logger.debug(
-            "Saved BM25 index to '%s'", str(BM25_DIRECTORY)
+        # save bm25 database
+        self._bm25_index(
+            chunks_content, [{"id": chunk_id} for chunk_id in chunks_ids]
         )
+        self.lm.logger.debug("Saved BM25 index to '%s'", str(BM25_DIRECTORY))
 
+        # save chroma database
+        chroma_added_chunks_count: int = 0
         if not self.idiot:
-            self._chroma_index(chunks_content["chroma"], chunks_ids["chroma"])
+            chroma_chunks_content, chroma_chunks_ids = self._chroma_filter(
+                chunks_content, chunks_metadata, chunks_ids,
+            )
+            chroma_added_chunks_count = len(chroma_chunks_ids)
+
+            self._chroma_index(chroma_chunks_content, chroma_chunks_ids)
             self.lm.logger.debug(
                 "Saved Chroma index to '%s'", str(CHROMA_DIRECTORY)
             )
 
+        self.lm.logger.debug(
+            "BM25 - indexed: %d",
+            len(chunks_ids),
+        )
+
+        self.lm.logger.debug(
+            "Chroma - deleted: %d, added: %d, updated: %d",
+            chroma_deleted_chunks_count,
+            chroma_added_chunks_count,
+            chroma_updated_chunks_count,
+        )
+
+        # save chunks metadata
         self._store_chunks(chunks_metadata)
         self.lm.logger.debug(
             "Stored chunks content and metadata to '%s'",
             str(OUTPUT_DIRECTORY)
         )
 
+        # save manifest
         self._store_manifest()
         self.lm.logger.debug(
             "Stored manifest file to '%s'", str(MANIFEST_PATH.parent)
