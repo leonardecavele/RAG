@@ -1,4 +1,4 @@
-# standard imports
+# standard importelf.d
 import re
 import json
 import shutil
@@ -442,7 +442,7 @@ class Indexer:
         self.lm.logger.debug(
             "Chroma - deleted: %d, added: %d, updated: %d",
             chroma_deleted_chunks_count,
-            chroma_added_chunks_count,
+            chroma_added_chunks_count - chroma_updated_chunks_count,
             chroma_updated_chunks_count,
         )
 
