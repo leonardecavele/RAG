@@ -18,6 +18,10 @@ from pydantic import (
 # local imports
 from .text_splitter import TextSplitter
 from .logger import LoggerManager
+from .paths import (
+    OUTPUT_DIRECTORY, BM25_DIRECTORY, CHROMA_DIRECTORY,
+    CHUNKS_METADATA_PATH, MANIFEST_PATH
+)
 
 
 MAX_BATCH_SIZE: int = 1024
@@ -73,12 +77,6 @@ class Indexer:
         chunk_size: PositiveInt = 2000, idiot: bool = False
     ) -> None:
         self.directory_path = Path(directory_path)
-
-        self.output_directory = Path("data/processed")
-        self.bm25_directory = self.output_directory / "bm25"
-        self.chroma_directory = self.output_directory / "chroma"
-        self.chunks_metadata_path = self.output_directory / "chunks.json"
-        self.manifest_path = self.output_directory / "manifest.json"
 
         self.lm = lm
         self.chunk_size = chunk_size
@@ -152,7 +150,7 @@ class Indexer:
         chunks_metadata: list[dict[str, Any]] = []
         chunks_ids: dict[str, Any] = {"bm25": [], "chroma": []}
 
-        chroma_index_missing: bool = not self.chroma_directory.exists()
+        chroma_index_missing: bool = not CHROMA_DIRECTORY.exists()
 
         for file in files:
             file_id: str = self._md5sum(str(file))
@@ -235,20 +233,20 @@ class Indexer:
     def _bm25_index(
         self, chunks_content: list[str], chunks_ids: list[dict[str, str]]
     ) -> None:
-        if self.bm25_directory.exists():
-            shutil.rmtree(self.bm25_directory)
-        self.bm25_directory.mkdir(parents=True, exist_ok=True)
+        if BM25_DIRECTORY.exists():
+            shutil.rmtree(BM25_DIRECTORY)
+        BM25_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
         corpus_tokens = bm25s.tokenize(chunks_content)
         retriever = bm25s.BM25(corpus=chunks_ids)
         retriever.index(corpus_tokens)
-        retriever.save(str(self.bm25_directory))
+        retriever.save(str(BM25_DIRECTORY))
 
     def _chroma_index(
         self, chunks_content: list[str], chunks_ids: list[str]
     ) -> None:
-        self.chroma_directory.mkdir(parents=True, exist_ok=True)
-        client = chromadb.PersistentClient(path=str(self.chroma_directory))
+        CHROMA_DIRECTORY.mkdir(parents=True, exist_ok=True)
+        client = chromadb.PersistentClient(path=str(CHROMA_DIRECTORY))
 
         collection = client.get_or_create_collection(name="chunks")
 
@@ -272,20 +270,20 @@ class Indexer:
             collection.add(embeddings=batch_embeddings.tolist(), ids=batch_ids)
 
     def _store_chunks(self, chunks_metadata: list[dict[str, Any]]) -> None:
-        self.chunks_metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        CHUNKS_METADATA_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(self.chunks_metadata_path, "w") as f:
+        with open(CHUNKS_METADATA_PATH, "w") as f:
             json.dump(chunks_metadata, f)
 
     def _store_manifest(self) -> None:
-        self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(self.manifest_path, "w") as f:
+        with open(MANIFEST_PATH, "w") as f:
             json.dump(self.manifest.model_dump(mode="json"), f, indent=4)
 
     def _load_manifest(self) -> None:
         self.delete_chunks_ids = []
-        self.manifest = Manifest.from_file(self.manifest_path)
+        self.manifest = Manifest.from_file(MANIFEST_PATH)
 
         if (
             self.manifest.chunk_size != self.chunk_size
@@ -363,22 +361,22 @@ class Indexer:
 
         self._bm25_index(chunks_content["bm25"], chunks_ids["bm25"])
         self.lm.logger.debug(
-            "Saved BM25 index to '%s'", str(self.bm25_directory)
+            "Saved BM25 index to '%s'", str(BM25_DIRECTORY)
         )
 
         if not self.idiot:
             self._chroma_index(chunks_content["chroma"], chunks_ids["chroma"])
             self.lm.logger.debug(
-                "Saved Chroma index to '%s'", str(self.chroma_directory)
+                "Saved Chroma index to '%s'", str(CHROMA_DIRECTORY)
             )
 
         self._store_chunks(chunks_metadata)
         self.lm.logger.debug(
             "Stored chunks content and metadata to '%s'",
-            str(self.output_directory)
+            str(OUTPUT_DIRECTORY)
         )
 
         self._store_manifest()
         self.lm.logger.debug(
-            "Stored manifest file to '%s'", str(self.manifest_path.parent)
+            "Stored manifest file to '%s'", str(MANIFEST_PATH.parent)
         )
