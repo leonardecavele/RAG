@@ -10,6 +10,7 @@ from pydantic import ValidationError, TypeAdapter, PositiveInt
 from .error import ErrorCode
 from .logger import LoggerManager
 from .indexer import Indexer
+from .searcher import Searcher
 
 DEFAULT_VLLM: str = "vllm-0.10.1"
 
@@ -44,12 +45,19 @@ class CLI:
         self, query: str, k: int = 5,
         level: str = "error", library_level: str = "error"
     ) -> None:
-        query = TypeAdapter(str).validate_python(query)
-        k = TypeAdapter(PositiveInt).validate_python(k)
         self._init_logger(level, library_level)
-        self.lm.logger.debug("Searching %r with k=%d", query, k)
-
-        # Ensemble Retriever
+        try:
+            s = Searcher(
+                query=query,
+                lm=self.lm,
+                k=k
+            )
+        except ValidationError as e:
+            raise ValueError(f"Error with the arguments: {e}") from e  # todo
+        try:
+            s.search()
+        except ValidationError as e:
+            raise ValueError(f"Error while indexing: {e}") from e  # to do
 
     def answer(
         self, query: str, k: int = 5,

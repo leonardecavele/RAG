@@ -19,16 +19,9 @@ from pydantic import (
 from .text_splitter import TextSplitter
 from .logger import LoggerManager
 from .hash import md5sum, file_md5sum
-from .paths import (
-    OUTPUT_DIRECTORY, BM25_DIRECTORY, CHROMA_DIRECTORY,
-    CHUNKS_METADATA_PATH, MANIFEST_PATH
-)
-
-
-MAX_BATCH_SIZE: int = 1024
-LLM_MODEL: str = (
-    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    # "intfloat/multilingual-e5-small"
+from .defines import (
+    OUTPUT_DIRECTORY, BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH,
+    MANIFEST_PATH, MAX_BATCH_SIZE, LLM_MODEL
 )
 
 
