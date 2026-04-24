@@ -146,8 +146,9 @@ class Manifest(BaseModel):
             manifest_file.chunks_ids.add(chunk_id)
             manifest_file.stores.add(store)
 
-    def sync_files(self, files: list[Path]) -> list[str]:
+    def sync_files(self, files: list[Path]) -> tuple[list[str], set[str]]:
         delete_chunks_ids: list[str] = []
+        updated_files_ids: set[str] = set()
 
         for file in files:
             file_id: str = md5sum(str(file))
@@ -167,15 +168,16 @@ class Manifest(BaseModel):
                 )
                 manifest_files[file_id] = manifest_file
 
-            if manifest_file.file_hash != file_hash:
+            elif manifest_file.file_hash != file_hash:
                 delete_chunks_ids.extend(manifest_file.chunks_ids)
                 manifest_file.chunks_ids = set()
                 manifest_file.stores.clear()
+                updated_files_ids.add(file_id)
 
             manifest_file.file_path = str(file)
             manifest_file.file_hash = file_hash
 
-        return delete_chunks_ids
+        return delete_chunks_ids, updated_files_ids
 
 
 class Indexer:
@@ -192,6 +194,7 @@ class Indexer:
 
         self.extensions = self._parse_extensions(extensions)
         self.delete_chunks_ids: list[str] = []
+        self.updated_files_ids: set[str] = set()
 
         if not self.directory_path.exists():
             raise FileNotFoundError(
@@ -315,10 +318,9 @@ class Indexer:
         retriever.save(str(BM25_DIRECTORY))
 
     def _chroma_filter(
-        self,
-        chunks_content: list[str],
+        self, chunks_content: list[str],
         chunks_metadata: dict[str, dict[str, Any]],
-        chunks_ids: list[str],
+        chunks_ids: list[str]
     ) -> tuple[list[str], list[str]]:
         chroma_chunks_content: list[str] = []
         chroma_chunks_ids: list[str] = []
@@ -337,11 +339,15 @@ class Indexer:
             )
             manifest_file = manifest_files.get(file_id)
 
-            if manifest_file is None:
+            if (
+                (self.idiot and file_id not in self.updated_files_ids)
+                or manifest_file is None
+            ):
                 continue
 
             if (
                 chroma_store_missing
+                or file_id in self.updated_files_ids
                 or "chroma" not in manifest_file.stores
                 or chunk_id not in manifest_file.chunks_ids
             ):
@@ -419,7 +425,9 @@ class Indexer:
         self.lm.logger.debug("Found %d files", len(files))
 
         # sync manifest files
-        self.delete_chunks_ids.extend(self.manifest.sync_files(files))
+        delete_chunks_ids, updated_files_ids = self.manifest.sync_files(files)
+        self.delete_chunks_ids.extend(delete_chunks_ids)
+        self.updated_files_ids.update(updated_files_ids)
         chroma_updated_chunks_count: int = (
             len(self.delete_chunks_ids) - chroma_deleted_chunks_count
         )
@@ -443,24 +451,19 @@ class Indexer:
 
         # save chroma database
         chroma_added_chunks_count: int = 0
-
         chroma_chunks_content, chroma_chunks_ids = self._chroma_filter(
-            chunks_content, chunks_metadata, chunks_ids,
+            chunks_content, chunks_metadata, chunks_ids
         )
         chroma_added_chunks_count = len(chroma_chunks_ids)
 
-        if chroma_chunks_ids or self.delete_chunks_ids:
-            self._chroma_index(chroma_chunks_content, chroma_chunks_ids)
+        self._chroma_index(chroma_chunks_content, chroma_chunks_ids)
+        self.manifest.add_store(
+            chunks_metadata, chroma_chunks_ids, "chroma"
+        )
+        self.lm.logger.debug(
+            "Saved Chroma index to '%s'", str(CHROMA_DIRECTORY)
+        )
 
-            if chroma_chunks_ids:
-                self.manifest.add_store(
-                    chunks_metadata, chroma_chunks_ids, "chroma"
-                )
-
-            self.lm.logger.debug(
-                "Saved Chroma index to '%s'", str(CHROMA_DIRECTORY)
-            )
-        
         self.lm.logger.debug(
             "BM25 - indexed: %d",
             len(chunks_ids),
