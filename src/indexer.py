@@ -133,7 +133,9 @@ class Manifest(BaseModel):
             file_hash: str = file_md5sum(file)
             file_suffix: str = file.suffix.removeprefix(".").lower()
 
-            manifest_files = self.files_by_extensions.setdefault(file_suffix, {})
+            manifest_files = self.files_by_extensions.setdefault(
+                file_suffix, {}
+            )
             manifest_file = manifest_files.get(file_id)
 
             if manifest_file is None:
@@ -216,10 +218,10 @@ class Indexer:
 
     def _split_into_chunks(
         self, files: list[Path]
-    ) -> tuple[list[str], list[dict[str, Any]], list[str]]:
+    ) -> tuple[list[str], dict[str, dict[str, Any]], list[str]]:
 
         chunks_content: list[str] = []
-        chunks_metadata: list[dict[str, Any]] = []
+        chunks_metadata: dict[str, dict[str, Any]] = {}
         chunks_ids: list[str] = []
 
         for file in files:
@@ -264,7 +266,7 @@ class Indexer:
                     f"_{last_character_index}"
                 )
 
-                chunks_metadata.append(
+                chunks_metadata[chunk_id] = (
                     ChunkMetadata(
                         content=content,
                         file_path=str(file),
@@ -317,7 +319,9 @@ class Indexer:
             )
             collection.add(embeddings=batch_embeddings.tolist(), ids=batch_ids)
 
-    def _store_chunks(self, chunks_metadata: list[dict[str, Any]]) -> None:
+    def _store_chunks(
+        self, chunks_metadata: dict[str, dict[str, Any]]
+    ) -> None:
         CHUNKS_METADATA_PATH.parent.mkdir(parents=True, exist_ok=True)
 
         with open(CHUNKS_METADATA_PATH, "w") as f:
@@ -330,19 +334,19 @@ class Indexer:
             json.dump(self.manifest.model_dump(mode="json"), f, indent=4)
 
     def _chroma_filter(
-        self, chunks_content: list[str],
-        chunks_metadata: list[dict[str, Any]], chunks_ids: list[str],
+        self,
+        chunks_content: list[str],
+        chunks_metadata: dict[str, dict[str, Any]],
+        chunks_ids: list[str],
     ) -> tuple[list[str], list[str]]:
         chroma_chunks_content: list[str] = []
         chroma_chunks_ids: list[str] = []
 
         chroma_index_missing: bool = not CHROMA_DIRECTORY.exists()
 
-        for content, metadata, chunk_id in zip(
-            chunks_content,
-            chunks_metadata,
-            chunks_ids,
-        ):
+        for content, chunk_id in zip(chunks_content, chunks_ids):
+            metadata = chunks_metadata[chunk_id]
+
             file_path = Path(metadata["file_path"])
             file_id: str = md5sum(str(file_path))
             file_suffix: str = file_path.suffix.removeprefix(".").lower()
