@@ -18,9 +18,12 @@ from .defines import (
 from .types import MinimalSearchResults, MinimalSource
 
 MAX_CONTENT_LENGTH: int = 200
-BM25_SCORE_WEIGHT: float = 0.75
-CHROMA_SCORE_WEIGHT: float = 0.25
+
+BM25_SCORE_WEIGHT: float = 0.65
+CHROMA_SCORE_WEIGHT: float = 0.35
+
 RRF_K: int = 60
+CANDIDATE_MULTIPLIER: int = 42
 
 
 class Translator:
@@ -62,13 +65,17 @@ class Searcher():
         self.k = min(
             k, len(self.retriever.corpus) if self.retriever.corpus else 0
         )
+        self.candidate_k = min(
+            k * CANDIDATE_MULTIPLIER,
+            len(self.retriever.corpus) if self.retriever.corpus else 0
+        )
 
         self.query = query
         self.translated_query: str = ""
 
     def _bm25_ids(self) -> list[str]:
         query_tokens = bm25s.tokenize(self.translated_query)
-        results, _ = self.retriever.retrieve(query_tokens, k=self.k)
+        results, _ = self.retriever.retrieve(query_tokens, k=self.candidate_k)
 
         return [result["id"] for result in results[0]]
 
@@ -82,7 +89,8 @@ class Searcher():
         )
 
         results = collection.query(
-            query_embeddings=[query_embedding.tolist()], n_results=self.k
+            query_embeddings=[query_embedding.tolist()],
+            n_results=self.candidate_k
         )
 
         ids = results.get("ids", [[]])
