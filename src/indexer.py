@@ -21,7 +21,7 @@ from .logger import LoggerManager
 from .hash import md5sum, file_md5sum
 from .defines import (
     OUTPUT_DIRECTORY, BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH,
-    MANIFEST_PATH, MAX_BATCH_SIZE, LLM_MODEL
+    MANIFEST_PATH, MAX_BATCH_SIZE, EMBEDDING_MODEL
 )
 
 
@@ -43,7 +43,7 @@ class Manifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     chunk_size: int = Field(0, ge=0)
-    llm_model: str = LLM_MODEL
+    llm_model: str = EMBEDDING_MODEL
     extensions: list[str] = Field(default_factory=list)
     files_by_extensions: dict[str, dict[str, CachedFile]] = Field(
         default_factory=dict
@@ -103,21 +103,21 @@ class Manifest(BaseModel):
         cls, chunk_size: int, extensions: set[str]
     ) -> tuple["Manifest", list[str]]:
         if not MANIFEST_PATH.exists():
-            return cls(chunk_size=chunk_size, llm_model=LLM_MODEL), []
+            return cls(chunk_size=chunk_size, llm_model=EMBEDDING_MODEL), []
 
         manifest = cls(**cls.existing_manifest_data())
         delete_chunks_ids: list[str] = []
 
         if (
             manifest.chunk_size != chunk_size
-            or manifest.llm_model != LLM_MODEL
+            or manifest.llm_model != EMBEDDING_MODEL
         ):
             for files_by_id in manifest.files_by_extensions.values():
                 for cached_file in files_by_id.values():
                     delete_chunks_ids.extend(cached_file.chunks_ids)
 
             return (
-                cls(chunk_size=chunk_size, llm_model=LLM_MODEL),
+                cls(chunk_size=chunk_size, llm_model=EMBEDDING_MODEL),
                 delete_chunks_ids
             )
 
@@ -253,7 +253,7 @@ class Indexer:
             file_id: str = md5sum(str(file))
 
             doc: Document = self._load_document(file)
-            self.lm.logger.debug("Loaded '%s' file", str(file))
+            # self.lm.logger.debug("Loaded '%s' file", str(file))
 
             splitter: TextSplitter = TextSplitter.from_filename(
                 str(file), chunk_size=self.chunk_size,
@@ -372,7 +372,7 @@ class Indexer:
         if not chunks_ids:
             return
 
-        embedding_model = SentenceTransformer(LLM_MODEL)
+        embedding_model = SentenceTransformer(EMBEDDING_MODEL)
         self.lm.logger.debug(
             "Embedding model device: %s", embedding_model.device
         )

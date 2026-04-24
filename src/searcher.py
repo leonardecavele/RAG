@@ -7,17 +7,37 @@ import bm25s
 import chromadb
 from sentence_transformers import SentenceTransformer
 from pydantic import validate_call
+from transformers import pipeline
 
 # local imports
 from .logger import LoggerManager
 from .defines import (
-    BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH, LLM_MODEL
+    BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH,
+    EMBEDDING_MODEL, TRANSLATION_MODEL
 )
 from .types import MinimalSearchResults, MinimalSource
 
 MAX_CONTENT_LENGTH: int = 200
-BM25_SCORE_WEIGHT: float = 0.7
-CHROMA_SCORE_WEIGHT: float = 0.3
+BM25_SCORE_WEIGHT: float = 0.75
+CHROMA_SCORE_WEIGHT: float = 0.25
+RRF_K: int = 60
+
+
+class Translator:
+    def __init__(self) -> None:
+        self.translator = pipeline(task="translation", model=TRANSLATION_MODEL)
+
+    @staticmethod
+    def _normalize(query: str) -> str:
+        return " ".join(query.split())
+
+    def translate_to_english(self, text: str) -> str:
+        if not text.strip():
+            return ""
+
+        normalized: str = self._normalize(text)
+        result = self.translator(normalized, max_length=512)
+        return str(result[0]["translation_text"])
 
 
 class Searcher():
@@ -42,10 +62,12 @@ class Searcher():
         self.k = min(
             k, len(self.retriever.corpus) if self.retriever.corpus else 0
         )
+
         self.query = query
+        self.translated_query: str = ""
 
     def _bm25_ids(self) -> list[str]:
-        query_tokens = bm25s.tokenize(self.query)
+        query_tokens = bm25s.tokenize(self.translated_query)
         results, _ = self.retriever.retrieve(query_tokens, k=self.k)
 
         return [result["id"] for result in results[0]]
@@ -54,9 +76,9 @@ class Searcher():
         client = chromadb.PersistentClient(path=str(CHROMA_DIRECTORY))
         collection = client.get_collection(name="chunks")
 
-        embedding_model = SentenceTransformer(LLM_MODEL)
+        embedding_model = SentenceTransformer(EMBEDDING_MODEL)
         query_embedding = embedding_model.encode(
-            self.query, convert_to_numpy=True,
+            self.translated_query, convert_to_numpy=True,
         )
 
         results = collection.query(
@@ -67,21 +89,17 @@ class Searcher():
         return ids[0]
 
     @staticmethod
-    def _rrf(
-        rankings: list[tuple[list[str], float]], rrf_k: int = 60
-    ) -> list[str]:
+    def _rrf(rankings: list[tuple[list[str], float]]) -> list[str]:
         scores: dict[str, float] = {}
 
         for ranking, weight in rankings:
             for rank, chunk_id in enumerate(ranking, start=1):
                 scores[chunk_id] = scores.get(chunk_id, 0.0) + (
-                    weight / (rrf_k + rank)
+                    weight / (RRF_K + rank)
                 )
 
         return sorted(
-            scores,
-            key=lambda chunk_id: scores[chunk_id],
-            reverse=True,
+            scores, key=lambda chunk_id: scores[chunk_id], reverse=True
         )
 
     # change output
@@ -129,7 +147,11 @@ class Searcher():
     def search(self) -> MinimalSearchResults:
         self.lm.logger.debug("Searching %r with k=%d", self.query, self.k)
 
-        ids: list[list[str]] = []
+        translator = Translator()
+        self.translated_query = translator.translate_to_english(self.query)
+        self.lm.logger.debug("Translated query: %s", self.translated_query)
+
+        ids: list[tuple[list[str], float]] = []
 
         ids.append((self._bm25_ids(), BM25_SCORE_WEIGHT))
         if CHROMA_DIRECTORY.exists():
@@ -156,7 +178,7 @@ class Searcher():
 
         msr = MinimalSearchResults(
             question_id="manual",
-            question=self.query,
+            question=self.translated_query,
             retrieved_sources=sources
         )
 
