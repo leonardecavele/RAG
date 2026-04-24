@@ -1,4 +1,4 @@
-# standard importelf.d
+# standard import
 import re
 import json
 import shutil
