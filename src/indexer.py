@@ -33,6 +33,7 @@ class ChunkMetadata(BaseModel):
 
 
 class CachedFile(BaseModel):
+    stores: set[str] = Field(default_factory=set)
     file_path: str
     file_hash: str
     chunks_ids: set[str]
@@ -125,6 +126,26 @@ class Manifest(BaseModel):
 
         return manifest, delete_chunks_ids
 
+    def add_store(
+        self, chunks_metadata: dict[str, dict[str, Any]],
+        chunks_ids: list[str], store: str,
+    ) -> None:
+        for chunk_id in chunks_ids:
+            metadata = chunks_metadata[chunk_id]
+
+            file_path = Path(metadata["file_path"])
+            file_id: str = md5sum(str(file_path))
+            file_suffix: str = file_path.suffix.removeprefix(".").lower()
+
+            manifest_files = self.files_by_extensions.get(file_suffix, {})
+            manifest_file = manifest_files.get(file_id)
+
+            if manifest_file is None:
+                continue
+
+            manifest_file.chunks_ids.add(chunk_id)
+            manifest_file.stores.add(store)
+
     def sync_files(self, files: list[Path]) -> list[str]:
         delete_chunks_ids: list[str] = []
 
@@ -149,6 +170,7 @@ class Manifest(BaseModel):
             if manifest_file.file_hash != file_hash:
                 delete_chunks_ids.extend(manifest_file.chunks_ids)
                 manifest_file.chunks_ids = set()
+                manifest_file.stores.clear()
 
             manifest_file.file_path = str(file)
             manifest_file.file_hash = file_hash
@@ -292,6 +314,42 @@ class Indexer:
         retriever.index(corpus_tokens)
         retriever.save(str(BM25_DIRECTORY))
 
+    def _chroma_filter(
+        self,
+        chunks_content: list[str],
+        chunks_metadata: dict[str, dict[str, Any]],
+        chunks_ids: list[str],
+    ) -> tuple[list[str], list[str]]:
+        chroma_chunks_content: list[str] = []
+        chroma_chunks_ids: list[str] = []
+
+        chroma_store_missing: bool = not CHROMA_DIRECTORY.exists()
+
+        for content, chunk_id in zip(chunks_content, chunks_ids):
+            metadata = chunks_metadata[chunk_id]
+
+            file_path = Path(metadata["file_path"])
+            file_id: str = md5sum(str(file_path))
+            file_suffix: str = file_path.suffix.removeprefix(".").lower()
+
+            manifest_files = self.manifest.files_by_extensions.get(
+                file_suffix, {}
+            )
+            manifest_file = manifest_files.get(file_id)
+
+            if manifest_file is None:
+                continue
+
+            if (
+                chroma_store_missing
+                or "chroma" not in manifest_file.stores
+                or chunk_id not in manifest_file.chunks_ids
+            ):
+                chroma_chunks_content.append(content)
+                chroma_chunks_ids.append(chunk_id)
+
+        return chroma_chunks_content, chroma_chunks_ids
+
     def _chroma_index(
         self, chunks_content: list[str], chunks_ids: list[str]
     ) -> None:
@@ -334,44 +392,6 @@ class Indexer:
 
         with open(MANIFEST_PATH, "w") as f:
             json.dump(self.manifest.model_dump(mode="json"), f, indent=4)
-
-    def _chroma_filter(
-        self,
-        chunks_content: list[str],
-        chunks_metadata: dict[str, dict[str, Any]],
-        chunks_ids: list[str],
-    ) -> tuple[list[str], list[str]]:
-        chroma_chunks_content: list[str] = []
-        chroma_chunks_ids: list[str] = []
-
-        chroma_index_missing: bool = not CHROMA_DIRECTORY.exists()
-
-        for content, chunk_id in zip(chunks_content, chunks_ids):
-            metadata = chunks_metadata[chunk_id]
-
-            file_path = Path(metadata["file_path"])
-            file_id: str = md5sum(str(file_path))
-            file_suffix: str = file_path.suffix.removeprefix(".").lower()
-
-            manifest_files = self.manifest.files_by_extensions.get(
-                file_suffix, {}
-            )
-            manifest_file = manifest_files.get(file_id)
-
-            if manifest_file is None:
-                continue
-
-            needs_chroma: bool = (
-                chroma_index_missing
-                or chunk_id not in manifest_file.chunks_ids
-            )
-
-            if needs_chroma:
-                chroma_chunks_content.append(content)
-                chroma_chunks_ids.append(chunk_id)
-                manifest_file.chunks_ids.add(chunk_id)
-
-        return chroma_chunks_content, chroma_chunks_ids
 
     def index_directory(self) -> None:
         self.lm.logger.debug(
@@ -418,21 +438,29 @@ class Indexer:
         self._bm25_index(
             chunks_content, [{"id": chunk_id} for chunk_id in chunks_ids]
         )
+        self.manifest.add_store(chunks_metadata, chunks_ids, "bm25")
         self.lm.logger.debug("Saved BM25 index to '%s'", str(BM25_DIRECTORY))
 
         # save chroma database
         chroma_added_chunks_count: int = 0
-        if not self.idiot:
-            chroma_chunks_content, chroma_chunks_ids = self._chroma_filter(
-                chunks_content, chunks_metadata, chunks_ids,
-            )
-            chroma_added_chunks_count = len(chroma_chunks_ids)
 
+        chroma_chunks_content, chroma_chunks_ids = self._chroma_filter(
+            chunks_content, chunks_metadata, chunks_ids,
+        )
+        chroma_added_chunks_count = len(chroma_chunks_ids)
+
+        if chroma_chunks_ids or self.delete_chunks_ids:
             self._chroma_index(chroma_chunks_content, chroma_chunks_ids)
+
+            if chroma_chunks_ids:
+                self.manifest.add_store(
+                    chunks_metadata, chroma_chunks_ids, "chroma"
+                )
+
             self.lm.logger.debug(
                 "Saved Chroma index to '%s'", str(CHROMA_DIRECTORY)
             )
-
+        
         self.lm.logger.debug(
             "BM25 - indexed: %d",
             len(chunks_ids),
@@ -441,7 +469,7 @@ class Indexer:
         self.lm.logger.debug(
             "Chroma - deleted: %d, added: %d, updated: %d",
             chroma_deleted_chunks_count,
-            chroma_added_chunks_count - chroma_updated_chunks_count,
+            max(0, chroma_added_chunks_count - chroma_updated_chunks_count),
             chroma_updated_chunks_count,
         )
 

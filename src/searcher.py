@@ -6,20 +6,18 @@ from typing import Any
 import bm25s
 import chromadb
 from sentence_transformers import SentenceTransformer
-from pydantic import (
-    validate_call, PositiveInt, BaseModel,
-    Field, ValidationError, ConfigDict
-)
+from pydantic import validate_call
 
 # local imports
 from .logger import LoggerManager
 from .defines import (
-    OUTPUT_DIRECTORY, BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH,
-    MANIFEST_PATH, MAX_BATCH_SIZE, LLM_MODEL
+    BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH, LLM_MODEL
 )
 from .types import MinimalSearchResults, MinimalSource
 
-MAX_CONTENT_LENGTH: int = 80
+MAX_CONTENT_LENGTH: int = 200
+BM25_SCORE_WEIGHT: float = 0.7
+CHROMA_SCORE_WEIGHT: float = 0.3
 
 
 class Searcher():
@@ -69,19 +67,24 @@ class Searcher():
         return ids[0]
 
     @staticmethod
-    def _rrf(rankings: list[list[str]], rrf_k: int = 60) -> list[str]:
+    def _rrf(
+        rankings: list[tuple[list[str], float]], rrf_k: int = 60
+    ) -> list[str]:
         scores: dict[str, float] = {}
 
-        for ranking in rankings:
+        for ranking, weight in rankings:
             for rank, chunk_id in enumerate(ranking, start=1):
                 scores[chunk_id] = scores.get(chunk_id, 0.0) + (
-                    1.0 / (rrf_k + rank)
+                    weight / (rrf_k + rank)
                 )
 
         return sorted(
-            scores, key=lambda chunk_id: scores[chunk_id], reverse=True
+            scores,
+            key=lambda chunk_id: scores[chunk_id],
+            reverse=True,
         )
 
+    # change output
     def _format_result(
         self, search_result: MinimalSearchResults,
         chunks_metadata: dict[str, dict[str, Any]],
@@ -128,9 +131,9 @@ class Searcher():
 
         ids: list[list[str]] = []
 
-        ids.append(self._bm25_ids())
+        ids.append((self._bm25_ids(), BM25_SCORE_WEIGHT))
         if CHROMA_DIRECTORY.exists():
-            ids.append(self._chroma_ids())
+            ids.append((self._chroma_ids(), CHROMA_SCORE_WEIGHT))
 
         merged_ids = self._rrf(ids)
         selected_ids = merged_ids[:self.k]
