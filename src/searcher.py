@@ -19,6 +19,8 @@ from .defines import (
 )
 from .types import MinimalSearchResults, MinimalSource
 
+MAX_CONTENT_LENGTH: int = 80
+
 
 class Searcher():
     @validate_call(config={"arbitrary_types_allowed": True})
@@ -44,23 +46,102 @@ class Searcher():
         )
         self.query = query
 
-        #if CHROMA_DIRECTORY.exists():
-        self.chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIRECTORY))
-        self.chroma_collection = self.chroma_client.get_collection(name="chunks")
-        self.embedding_model = SentenceTransformer(LLM_MODEL)
+    def _bm25_ids(self) -> list[str]:
+        query_tokens = bm25s.tokenize(self.query)
+        results, _ = self.retriever.retrieve(query_tokens, k=self.k)
+
+        return [result["id"] for result in results[0]]
+
+    def _chroma_ids(self) -> list[str]:
+        client = chromadb.PersistentClient(path=str(CHROMA_DIRECTORY))
+        collection = client.get_collection(name="chunks")
+
+        embedding_model = SentenceTransformer(LLM_MODEL)
+        query_embedding = embedding_model.encode(
+            self.query, convert_to_numpy=True,
+        )
+
+        results = collection.query(
+            query_embeddings=[query_embedding.tolist()], n_results=self.k
+        )
+
+        ids = results.get("ids", [[]])
+        return ids[0]
+
+    @staticmethod
+    def _rrf(rankings: list[list[str]], rrf_k: int = 60) -> list[str]:
+        scores: dict[str, float] = {}
+
+        for ranking in rankings:
+            for rank, chunk_id in enumerate(ranking, start=1):
+                scores[chunk_id] = scores.get(chunk_id, 0.0) + (
+                    1.0 / (rrf_k + rank)
+                )
+
+        return sorted(
+            scores, key=lambda chunk_id: scores[chunk_id], reverse=True
+        )
+
+    def _format_result(
+        self, search_result: MinimalSearchResults,
+        chunks_metadata: dict[str, dict[str, Any]],
+        selected_ids: list[str],
+    ) -> str:
+        lines: list[str] = []
+
+        lines.append("=" * 80)
+        lines.append("SEARCH RESULT")
+        lines.append("=" * 80)
+        lines.append(f"question_id: {search_result.question_id}")
+        lines.append(f"question:    {search_result.question}")
+        lines.append(f"k:           {len(search_result.retrieved_sources)}")
+        lines.append("")
+
+        for index, (source, chunk_id) in enumerate(
+            zip(search_result.retrieved_sources, selected_ids),
+            start=1,
+        ):
+            metadata = chunks_metadata[chunk_id]
+            content = str(metadata.get("content", ""))
+
+            if len(content) > MAX_CONTENT_LENGTH:
+                content = content[:MAX_CONTENT_LENGTH] + "\n[...]"
+
+            source_json = source.model_dump_json(indent=4)
+
+            lines.append("-" * 80)
+            lines.append(f"RESULT #{index}")
+            lines.append("-" * 80)
+            lines.append("source:")
+            lines.append(source_json)
+            lines.append("")
+            lines.append("content:")
+            lines.append("```")
+            lines.append(content)
+            lines.append("```")
+            lines.append("")
+
+        return "\n".join(lines)
 
     def search(self) -> MinimalSearchResults:
         self.lm.logger.debug("Searching %r with k=%d", self.query, self.k)
 
-        query_tokens = bm25s.tokenize(self.query)
-        results, scores = self.retriever.retrieve(query_tokens, k=self.k)
+        ids: list[list[str]] = []
+
+        ids.append(self._bm25_ids())
+        if CHROMA_DIRECTORY.exists():
+            ids.append(self._chroma_ids())
+
+        merged_ids = self._rrf(ids)
+        selected_ids = merged_ids[:self.k]
 
         with open(CHUNKS_METADATA_PATH, "r", encoding="utf-8") as f:
             chunks_metadata: dict[str, dict[str, Any]] = json.load(f)
 
         sources: list[MinimalSource] = []
-        for result in results[0]:
-            metadata = chunks_metadata[result["id"]]
+
+        for chunk_id in selected_ids:
+            metadata = chunks_metadata[chunk_id]
 
             sources.append(
                 MinimalSource(
@@ -75,6 +156,6 @@ class Searcher():
             question=self.query,
             retrieved_sources=sources
         )
-        print(msr)
 
+        print(self._format_result(msr, chunks_metadata, selected_ids))
         return msr
