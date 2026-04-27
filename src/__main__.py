@@ -4,6 +4,7 @@ import sys
 
 # extern imports
 import fire
+from rich.console import Console
 from pydantic import ValidationError, TypeAdapter, PositiveInt
 
 # local imports
@@ -11,8 +12,8 @@ from .error import ErrorCode
 from .logger import LoggerManager
 from .indexer import Indexer
 from .searcher import Searcher
-
-DEFAULT_VLLM: str = "vllm-0.10.1"
+from .defines import DEFAULT_VLLM
+from .display import print_msr
 
 
 class CLI:
@@ -46,6 +47,7 @@ class CLI:
         level: str = "error", library_level: str = "error"
     ) -> None:
         self._init_logger(level, library_level)
+        self._init_console()
         try:
             s = Searcher(
                 query=query,
@@ -55,7 +57,7 @@ class CLI:
         except ValidationError as e:
             raise ValueError(f"Error with the arguments: {e}") from e  # todo
         try:
-            s.search()
+            print_msr(s.search(), query)
         except ValidationError as e:
             raise ValueError(f"Error while indexing: {e}") from e  # to do
 
@@ -72,6 +74,9 @@ class CLI:
         level = TypeAdapter(str).validate_python(level)
         self.lm: LoggerManager = LoggerManager(level)
         self.lm.library_level(library_level)
+
+    def _init_console(self) -> None:
+        self.console = Console()
 
 
 def main() -> ErrorCode:

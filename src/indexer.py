@@ -21,7 +21,7 @@ from .logger import LoggerManager
 from .hash import md5sum, file_md5sum
 from .defines import (
     OUTPUT_DIRECTORY, BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH,
-    MANIFEST_PATH, MAX_BATCH_SIZE, EMBEDDING_MODEL
+    MANIFEST_PATH, MAX_BATCH_SIZE, EMBEDDING_MODEL, DEFAULT_VLLM
 )
 
 
@@ -45,6 +45,7 @@ class Manifest(BaseModel):
     chunk_size: int = Field(0, ge=0)
     llm_model: str = EMBEDDING_MODEL
     extensions: list[str] = Field(default_factory=list)
+    vllm: str = DEFAULT_VLLM
     files_by_extensions: dict[str, dict[str, CachedFile]] = Field(
         default_factory=dict
     )
@@ -111,6 +112,7 @@ class Manifest(BaseModel):
         if (
             manifest.chunk_size != chunk_size
             or manifest.llm_model != EMBEDDING_MODEL
+            or manifest.vllm != DEFAULT_VLLM
         ):
             for files_by_id in manifest.files_by_extensions.values():
                 for cached_file in files_by_id.values():
@@ -400,6 +402,9 @@ class Indexer:
             json.dump(self.manifest.model_dump(mode="json"), f, indent=4)
 
     def index_directory(self) -> None:
+        # TODO : check if repository is empty check before bm25 if it founds
+        # something
+
         self.lm.logger.debug(
             "Indexing %s with chunk size %d",
             str(self.directory_path), self.chunk_size

@@ -7,15 +7,15 @@ import bm25s
 import chromadb
 from sentence_transformers import SentenceTransformer
 from pydantic import validate_call
-from transformers import pipeline
 
 # local imports
 from .logger import LoggerManager
 from .defines import (
-    BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH,
-    EMBEDDING_MODEL, TRANSLATION_MODEL
+    BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH, EMBEDDING_MODEL
 )
 from .types import MinimalSearchResults, MinimalSource
+from .translate import Translator
+from .hash import md5sum
 
 MAX_CONTENT_LENGTH: int = 200
 
@@ -24,23 +24,6 @@ CHROMA_SCORE_WEIGHT: float = 0.35
 
 RRF_K: int = 60
 CANDIDATE_MULTIPLIER: int = 42
-
-
-class Translator:
-    def __init__(self) -> None:
-        self.translator = pipeline(task="translation", model=TRANSLATION_MODEL)
-
-    @staticmethod
-    def _normalize(query: str) -> str:
-        return " ".join(query.split())
-
-    def translate_to_english(self, text: str) -> str:
-        if not text.strip():
-            return ""
-
-        normalized: str = self._normalize(text)
-        result = self.translator(normalized, max_length=512)
-        return str(result[0]["translation_text"])
 
 
 class Searcher():
@@ -110,48 +93,6 @@ class Searcher():
             scores, key=lambda chunk_id: scores[chunk_id], reverse=True
         )
 
-    # change output
-    def _format_result(
-        self, search_result: MinimalSearchResults,
-        chunks_metadata: dict[str, dict[str, Any]],
-        selected_ids: list[str],
-    ) -> str:
-        lines: list[str] = []
-
-        lines.append("=" * 80)
-        lines.append("SEARCH RESULT")
-        lines.append("=" * 80)
-        lines.append(f"question_id: {search_result.question_id}")
-        lines.append(f"question:    {search_result.question}")
-        lines.append(f"k:           {len(search_result.retrieved_sources)}")
-        lines.append("")
-
-        for index, (source, chunk_id) in enumerate(
-            zip(search_result.retrieved_sources, selected_ids),
-            start=1,
-        ):
-            metadata = chunks_metadata[chunk_id]
-            content = str(metadata.get("content", ""))
-
-            if len(content) > MAX_CONTENT_LENGTH:
-                content = content[:MAX_CONTENT_LENGTH] + "\n[...]"
-
-            source_json = source.model_dump_json(indent=4)
-
-            lines.append("-" * 80)
-            lines.append(f"RESULT #{index}")
-            lines.append("-" * 80)
-            lines.append("source:")
-            lines.append(source_json)
-            lines.append("")
-            lines.append("content:")
-            lines.append("```")
-            lines.append(content)
-            lines.append("```")
-            lines.append("")
-
-        return "\n".join(lines)
-
     def search(self) -> MinimalSearchResults:
         self.lm.logger.debug("Searching %r with k=%d", self.query, self.k)
 
@@ -167,6 +108,7 @@ class Searcher():
 
         merged_ids = self._rrf(ids)
         selected_ids = merged_ids[:self.k]
+        print(selected_ids)
 
         with open(CHUNKS_METADATA_PATH, "r", encoding="utf-8") as f:
             chunks_metadata: dict[str, dict[str, Any]] = json.load(f)
@@ -185,10 +127,9 @@ class Searcher():
             )
 
         msr = MinimalSearchResults(
-            question_id="manual",
+            question_id=md5sum(self.query),
             question=self.translated_query,
             retrieved_sources=sources
         )
 
-        print(self._format_result(msr, chunks_metadata, selected_ids))
         return msr

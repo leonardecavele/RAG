@@ -17,3 +17,5 @@ EMBEDDING_MODEL: str = (
 TRANSLATION_MODEL: str = (
     "Helsinki-NLP/opus-mt-mul-en"
 )
+
+DEFAULT_VLLM: str = "vllm-0.10.1"
