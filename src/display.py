@@ -6,10 +6,10 @@ from rich.text import Text
 from .types import MinimalSearchResults
 
 
-def print_msr(msr: MinimalSearchResults, query: str) -> None:
-    console = Console()
+def print_msr(
+    console: Console, msr: MinimalSearchResults, query: str
+) -> None:
     console.print()
-
     console.print(
         Rule(
             title=f"[bold cyan] Search Results for: '{query}'[/]",

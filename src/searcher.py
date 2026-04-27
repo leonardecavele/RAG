@@ -1,21 +1,40 @@
 # standard imports
 import json
+import logging
+import uuid
+from pathlib import Path
 from typing import Any
 
 # extern imports
 import bm25s
 import chromadb
-from sentence_transformers import SentenceTransformer
-from pydantic import validate_call
+from pydantic import ValidationError, validate_call
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 
 # local imports
-from .logger import LoggerManager
 from .defines import (
-    BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH, EMBEDDING_MODEL
+    BM25_DIRECTORY,
+    CHROMA_DIRECTORY,
+    CHUNKS_METADATA_PATH,
+    DEFAULT_DATASET_PATH,
+    DEFAULT_SAVE_DIRECTORY,
 )
-from .types import MinimalSearchResults, MinimalSource
+from .logger import LoggerManager
 from .translate import Translator
-from .hash import md5sum
+from .types import (
+    MinimalSearchResults,
+    MinimalSource,
+    RagDataset,
+    StudentSearchResults,
+)
 
 MAX_CONTENT_LENGTH: int = 200
 
@@ -26,39 +45,73 @@ RRF_K: int = 60
 CANDIDATE_MULTIPLIER: int = 42
 
 
-class Searcher():
+class Searcher:
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
-        self, query: str, lm: LoggerManager, k: int = 5
+        self,
+        lm: LoggerManager,
+        console: Console,
+        embedding_model: Any,
+        translator: Translator,
+        query: str = "",
+        dataset_path: str = DEFAULT_DATASET_PATH,
+        save_directory: str = DEFAULT_SAVE_DIRECTORY,
+        k: int = 5,
+        question_id: str = "",
     ) -> None:
         self.lm = lm
+        self.console = console
+
+        if k <= 0:
+            raise ValueError("k must be greater than 0")
 
         if not BM25_DIRECTORY.exists():
-            raise FileNotFoundError(
-                "TODO"
-            )
+            raise FileNotFoundError("BM25 index directory does not exist")
         if not BM25_DIRECTORY.is_dir():
-            raise FileNotFoundError(
-                "TODO"
-            )
-        # maybe cannot access case, maybe do a helper func
-        # eventually use path.resolve()
-        self.retriever = bm25s.BM25.load(str(BM25_DIRECTORY), load_corpus=True)
+            raise NotADirectoryError("BM25 path is not a directory")
 
-        self.k = min(
-            k, len(self.retriever.corpus) if self.retriever.corpus else 0
+        if not CHUNKS_METADATA_PATH.exists():
+            raise FileNotFoundError("chunks metadata file does not exist")
+        if not CHUNKS_METADATA_PATH.is_file():
+            raise FileNotFoundError("chunks metadata path is not a file")
+
+        try:
+            with open(CHUNKS_METADATA_PATH, "r", encoding="utf-8") as f:
+                self.chunks_metadata: dict[str, dict[str, Any]] = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Invalid metadata JSON file: {CHUNKS_METADATA_PATH}"
+            ) from e
+
+        self.embedding_model = embedding_model
+        self.retriever = bm25s.BM25.load(
+            str(BM25_DIRECTORY),
+            load_corpus=True,
         )
-        self.candidate_k = min(
-            k * CANDIDATE_MULTIPLIER,
-            len(self.retriever.corpus) if self.retriever.corpus else 0
-        )
+
+        corpus_size = len(self.retriever.corpus) if self.retriever.corpus else 0
+        if corpus_size == 0:
+            raise ValueError("BM25 corpus is empty")
+
+        self.k = min(k, corpus_size)
+        self.candidate_k = min(k * CANDIDATE_MULTIPLIER, corpus_size)
 
         self.query = query
+        self.translator = translator
         self.translated_query: str = ""
+        self.question_id = question_id
 
-    def _bm25_ids(self) -> list[str]:
-        query_tokens = bm25s.tokenize(self.translated_query)
-        results, _ = self.retriever.retrieve(query_tokens, k=self.candidate_k)
+        self.dataset_path = dataset_path
+        self.save_directory = save_directory
+
+    def _bm25_ids(self, show_progress: bool = False) -> list[str]:
+        query_tokens = bm25s.tokenize(
+            self.translated_query, show_progress=show_progress,
+        )
+
+        results, _ = self.retriever.retrieve(
+            query_tokens, k=self.candidate_k, show_progress=show_progress,
+        )
 
         return [result["id"] for result in results[0]]
 
@@ -66,14 +119,13 @@ class Searcher():
         client = chromadb.PersistentClient(path=str(CHROMA_DIRECTORY))
         collection = client.get_collection(name="chunks")
 
-        embedding_model = SentenceTransformer(EMBEDDING_MODEL)
-        query_embedding = embedding_model.encode(
+        query_embedding = self.embedding_model.encode(
             self.translated_query, convert_to_numpy=True,
         )
 
         results = collection.query(
             query_embeddings=[query_embedding.tolist()],
-            n_results=self.candidate_k
+            n_results=self.candidate_k,
         )
 
         ids = results.get("ids", [[]])
@@ -90,46 +142,154 @@ class Searcher():
                 )
 
         return sorted(
-            scores, key=lambda chunk_id: scores[chunk_id], reverse=True
+            scores,
+            key=lambda chunk_id: scores[chunk_id],
+            reverse=True,
         )
 
-    def search(self) -> MinimalSearchResults:
+    def search(self, show_bm25_progress: bool = False) -> MinimalSearchResults:
         self.lm.logger.debug("Searching %r with k=%d", self.query, self.k)
 
-        translator = Translator()
-        self.translated_query = translator.translate_to_english(self.query)
+        self.translated_query = self.translator.translate_to_english(
+            self.query,
+        )
         self.lm.logger.debug("Translated query: %s", self.translated_query)
 
         ids: list[tuple[list[str], float]] = []
 
-        ids.append((self._bm25_ids(), BM25_SCORE_WEIGHT))
+        ids.append((
+            self._bm25_ids(show_progress=show_bm25_progress),
+            BM25_SCORE_WEIGHT,
+        ))
+
         if CHROMA_DIRECTORY.exists():
-            ids.append((self._chroma_ids(), CHROMA_SCORE_WEIGHT))
+            if CHROMA_DIRECTORY.is_dir():
+                try:
+                    ids.append((self._chroma_ids(), CHROMA_SCORE_WEIGHT))
+                except Exception as e:
+                    self.lm.logger.warning("Chroma search failed: %s", e)
+            else:
+                self.lm.logger.warning(
+                    "Chroma path exists but is not a directory: %s",
+                    CHROMA_DIRECTORY,
+                )
 
         merged_ids = self._rrf(ids)
         selected_ids = merged_ids[:self.k]
-        print(selected_ids)
 
-        with open(CHUNKS_METADATA_PATH, "r", encoding="utf-8") as f:
-            chunks_metadata: dict[str, dict[str, Any]] = json.load(f)
+        self.lm.logger.debug("Selected ids: %s", selected_ids)
 
         sources: list[MinimalSource] = []
 
         for chunk_id in selected_ids:
-            metadata = chunks_metadata[chunk_id]
+            md = self.chunks_metadata.get(chunk_id)
+            if md is None:
+                self.lm.logger.warning("Missing md for chunk id %s", chunk_id)
+                continue
 
-            sources.append(
-                MinimalSource(
-                    file_path=metadata["file_path"],
-                    first_character_index=metadata["first_character_index"],
-                    last_character_index=metadata["last_character_index"],
+            try:
+                sources.append(
+                    MinimalSource(
+                        file_path=md["file_path"],
+                        first_character_index=md["first_character_index"],
+                        last_character_index=md["last_character_index"],
+                    )
                 )
-            )
+            except KeyError as e:
+                raise ValueError(
+                    f"Invalid metadata for chunk id {chunk_id}: missing {e}"
+                ) from e
 
-        msr = MinimalSearchResults(
-            question_id=md5sum(self.query),
+        return MinimalSearchResults(
+            question_id=self.question_id or str(uuid.uuid4()),
             question=self.translated_query,
-            retrieved_sources=sources
+            retrieved_sources=sources,
         )
 
-        return msr
+    def _should_show_progress(self) -> bool:
+        return (
+            self.console.is_terminal
+            and not self.lm.logger.isEnabledFor(logging.INFO)
+        )
+
+    def search_dataset(self) -> None:
+        self.lm.logger.debug(
+            "Searching in %s with k=%d", self.dataset_path, self.k,
+        )
+
+        dataset_path = Path(self.dataset_path)
+        if not dataset_path.exists():
+            raise FileNotFoundError(
+                f"Dataset file does not exist: {dataset_path}"
+            )
+        if not dataset_path.is_file():
+            raise FileNotFoundError(
+                f"Dataset path is not a file: {dataset_path}"
+            )
+
+        try:
+            with open(dataset_path, "r", encoding="utf-8") as f:
+                raw_dataset = json.load(f)
+
+            dataset = RagDataset.model_validate(raw_dataset)
+
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Invalid JSON file: {dataset_path}"
+            ) from e
+
+        except ValidationError as e:
+            raise ValueError(
+                f"Invalid dataset format: {dataset_path}"
+            ) from e
+
+        results: list[MinimalSearchResults] = []
+        total = len(dataset.rag_questions)
+        show_progress = self._should_show_progress()
+
+        with Progress(
+            SpinnerColumn("shark", style="cyan"),
+            TextColumn("{task.description}"),
+            BarColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=self.console,
+            disable=not show_progress,
+        ) as progress:
+            task_id = progress.add_task(
+                f"[black]Searching [cyan]0/{total}", total=total
+            )
+
+            for index, question in enumerate(dataset.rag_questions, start=1):
+                progress.update(
+                    task_id, description=(
+                        f"[black]Searching [cyan]{index}/{total}"
+                    )
+                )
+
+                self.query = question.question
+                self.question_id = question.question_id
+
+                result = self.search(show_bm25_progress=False)
+                results.append(result)
+
+                progress.advance(task_id)
+
+        student_results = StudentSearchResults(
+            search_results=results, k=self.k
+        )
+
+        save_directory = Path(self.save_directory)
+        if save_directory.exists() and not save_directory.is_dir():
+            raise NotADirectoryError(
+                f"Save directory path is not a directory: {save_directory}"
+            )
+
+        save_directory.mkdir(parents=True, exist_ok=True)
+
+        output_path = save_directory / dataset_path.name
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(student_results.model_dump_json(indent=4))
+
+        self.lm.logger.info("Saved search results to %s", output_path)

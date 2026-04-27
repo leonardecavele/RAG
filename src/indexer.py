@@ -2,12 +2,22 @@
 import re
 import json
 import shutil
+import logging
 from pathlib import Path
 from typing import Any
 
 # extern imports
 import bm25s
 import chromadb
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 from sentence_transformers import SentenceTransformer
 from langchain_core.documents import Document
 from pydantic import (
@@ -52,15 +62,26 @@ class Manifest(BaseModel):
 
     @staticmethod
     def existing_manifest_data() -> dict[str, Any]:
-        manifest_data = {}
+        if not MANIFEST_PATH.exists():
+            return {}
+
+        if not MANIFEST_PATH.is_file():
+            raise FileNotFoundError(
+                f"Manifest path is not a file: {MANIFEST_PATH}"
+            )
 
         try:
-            with open(MANIFEST_PATH, "r") as f:
+            with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
                 manifest_data = json.load(f)
-            if not isinstance(manifest_data, dict):
-                pass  # to do
         except json.JSONDecodeError as e:
-            raise e from e  # to do
+            raise ValueError(
+                f"Invalid manifest JSON file: {MANIFEST_PATH}"
+            ) from e
+
+        if not isinstance(manifest_data, dict):
+            raise ValueError(
+                f"Invalid manifest format: expected object in {MANIFEST_PATH}"
+            )
 
         return manifest_data
 
@@ -169,6 +190,7 @@ class Manifest(BaseModel):
                     chunks_ids=set(),
                 )
                 manifest_files[file_id] = manifest_file
+                updated_files_ids.add(file_id)
 
             elif manifest_file.file_hash != file_hash:
                 delete_chunks_ids.extend(manifest_file.chunks_ids)
@@ -183,14 +205,15 @@ class Manifest(BaseModel):
 
 
 class Indexer:
-    @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
-        self, directory_path: str, lm: LoggerManager, extensions: str = "*",
-        chunk_size: PositiveInt = 2000, idiot: bool = False
+        self, directory_path: str, lm: LoggerManager, console: Console,
+        extensions: str = "*", chunk_size: PositiveInt = 2000,
+        idiot: bool = False
     ) -> None:
         self.directory_path = Path(directory_path)
 
         self.lm = lm
+        self.console = console
         self.chunk_size = chunk_size
         self.idiot = idiot
 
@@ -219,6 +242,11 @@ class Indexer:
             e: str = re.sub(r"[^a-zA-Z0-9]", "", extension).lower()
             if e:
                 parsed_extensions.add(e)
+
+        if not parsed_extensions:
+            raise ValueError(
+                "extensions must contain at least one valid extension or '*'"
+            )
 
         return parsed_extensions
 
@@ -310,13 +338,21 @@ class Indexer:
     def _bm25_index(
         self, chunks_content: list[str], chunks_ids: list[dict[str, str]]
     ) -> None:
+        if not chunks_content or not chunks_ids:
+            raise ValueError("No chunks to index with BM25")
+
         if BM25_DIRECTORY.exists():
+            if not BM25_DIRECTORY.is_dir():
+                raise NotADirectoryError(
+                    f"BM25 path is not a directory: {BM25_DIRECTORY}"
+                )
             shutil.rmtree(BM25_DIRECTORY)
+
         BM25_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
-        corpus_tokens = bm25s.tokenize(chunks_content)
+        corpus_tokens = bm25s.tokenize(chunks_content, show_progress=False)
         retriever = bm25s.BM25(corpus=chunks_ids)
-        retriever.index(corpus_tokens)
+        retriever.index(corpus_tokens, show_progress=False)
         retriever.save(str(BM25_DIRECTORY))
 
     def _chroma_filter(
@@ -358,9 +394,20 @@ class Indexer:
 
         return chroma_chunks_content, chroma_chunks_ids
 
+    def _should_show_progress(self) -> bool:
+        return (
+            self.console.is_terminal
+            and not self.lm.logger.isEnabledFor(logging.INFO)
+        )
+
     def _chroma_index(
         self, chunks_content: list[str], chunks_ids: list[str]
     ) -> None:
+        if CHROMA_DIRECTORY.exists() and not CHROMA_DIRECTORY.is_dir():
+            raise NotADirectoryError(
+                f"Chroma path is not a directory: {CHROMA_DIRECTORY}"
+            )
+
         CHROMA_DIRECTORY.mkdir(parents=True, exist_ok=True)
         client = chromadb.PersistentClient(path=str(CHROMA_DIRECTORY))
 
@@ -378,42 +425,80 @@ class Indexer:
         self.lm.logger.debug(
             "Embedding model device: %s", embedding_model.device
         )
-        for i in range(0, len(chunks_content), MAX_BATCH_SIZE):
-            batch_content = chunks_content[i:i + MAX_BATCH_SIZE]
-            batch_ids = chunks_ids[i:i + MAX_BATCH_SIZE]
 
-            batch_embeddings = embedding_model.encode(
-                batch_content, show_progress_bar=True, convert_to_numpy=True
+        total = (len(chunks_content) + MAX_BATCH_SIZE - 1) // MAX_BATCH_SIZE
+        show_progress = self._should_show_progress()
+
+        with Progress(
+            SpinnerColumn("shark", style="cyan"),
+            TextColumn("[black]{task.description}"),
+            BarColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=self.console,
+            disable=not show_progress,
+        ) as progress:
+            task_id = progress.add_task(
+                f"[black]Embedding [cyan]0/{total}",
+                total=total,
             )
-            collection.add(embeddings=batch_embeddings.tolist(), ids=batch_ids)
+
+            for batch_index, i in enumerate(
+                range(0, len(chunks_content), MAX_BATCH_SIZE),
+                start=1,
+            ):
+                progress.update(
+                    task_id,
+                    description=(
+                        f"[black]Embedding [cyan]{batch_index}/{total}"
+                    )
+                )
+
+                batch_content = chunks_content[i:i + MAX_BATCH_SIZE]
+                batch_ids = chunks_ids[i:i + MAX_BATCH_SIZE]
+
+                batch_embeddings = embedding_model.encode(
+                    batch_content,
+                    show_progress_bar=False,
+                    convert_to_numpy=True,
+                )
+                collection.add(
+                    embeddings=batch_embeddings.tolist(),
+                    ids=batch_ids,
+                )
+
+                progress.advance(task_id)
 
     def _store_chunks(
         self, chunks_metadata: dict[str, dict[str, Any]]
     ) -> None:
         CHUNKS_METADATA_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(CHUNKS_METADATA_PATH, "w") as f:
+        with open(CHUNKS_METADATA_PATH, "w", encoding="utf-8") as f:
             json.dump(chunks_metadata, f)
 
     def _store_manifest(self) -> None:
         MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(MANIFEST_PATH, "w") as f:
+        with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
             json.dump(self.manifest.model_dump(mode="json"), f, indent=4)
 
     def index_directory(self) -> None:
-        # TODO : check if repository is empty check before bm25 if it founds
-        # something
-
         self.lm.logger.debug(
             "Indexing %s with chunk size %d",
             str(self.directory_path), self.chunk_size
         )
 
         # load or create manifest
-        self.manifest, self.delete_chunks_ids = (
-            Manifest.load(self.chunk_size, self.extensions)
-        )
+        try:
+            self.manifest, self.delete_chunks_ids = (
+                Manifest.load(self.chunk_size, self.extensions)
+            )
+        except ValidationError as e:
+            raise ValueError(f"Invalid manifest: {e}") from e
+        except OSError as e:
+            raise type(e)(f"Error while loading manifest: {e}") from e
+
         chroma_deleted_chunks_count: int = len(self.delete_chunks_ids)
 
         # add missing extensions to the manifest
@@ -428,6 +513,11 @@ class Indexer:
         except OSError as e:
             raise type(e)(f"Error while collecting files: {e}") from e
         self.lm.logger.debug("Found %d files", len(files))
+
+        if not files:
+            raise ValueError(
+                f"No files found to index in {self.directory_path}"
+            )
 
         # sync manifest files
         delete_chunks_ids, updated_files_ids = self.manifest.sync_files(files)
@@ -446,6 +536,9 @@ class Indexer:
             raise ValueError(f"Error while chunking: {e}") from e
         except OSError as e:
             raise type(e)(f"Error while chunking: {e}") from e
+
+        if not chunks_ids:
+            raise ValueError("No chunks generated from collected files")
 
         # save bm25 database
         self._bm25_index(

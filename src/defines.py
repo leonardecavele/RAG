@@ -19,3 +19,10 @@ TRANSLATION_MODEL: str = (
 )
 
 DEFAULT_VLLM: str = "vllm-0.10.1"
+
+DEFAULT_DATASET_PATH: str = (
+    "datasets_public/public/UnansweredQuestions/dataset_code_public.json"
+)
+DEFAULT_SAVE_DIRECTORY: str = (
+    "data/output/search_results"
+)
