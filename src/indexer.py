@@ -205,6 +205,7 @@ class Manifest(BaseModel):
 
 
 class Indexer:
+    @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
         self, directory_path: str, lm: LoggerManager, console: Console,
         extensions: str = "*", chunk_size: PositiveInt = 2000,
@@ -377,10 +378,7 @@ class Indexer:
             )
             manifest_file = manifest_files.get(file_id)
 
-            if (
-                (self.idiot and file_id not in self.updated_files_ids)
-                or manifest_file is None
-            ):
+            if manifest_file is None:
                 continue
 
             if (
@@ -469,6 +467,10 @@ class Indexer:
 
                 progress.advance(task_id)
 
+            progress.update(
+                task_id, description=f"[green]Embedded [green]{total}/{total}"
+            )
+
     def _store_chunks(
         self, chunks_metadata: dict[str, dict[str, Any]]
     ) -> None:
@@ -549,18 +551,25 @@ class Indexer:
 
         # save chroma database
         chroma_added_chunks_count: int = 0
-        chroma_chunks_content, chroma_chunks_ids = self._chroma_filter(
-            chunks_content, chunks_metadata, chunks_ids
-        )
-        chroma_added_chunks_count = len(chroma_chunks_ids)
 
-        self._chroma_index(chroma_chunks_content, chroma_chunks_ids)
-        self.manifest.add_store(
-            chunks_metadata, chroma_chunks_ids, "chroma"
-        )
-        self.lm.logger.debug(
-            "Saved Chroma index to '%s'", str(CHROMA_DIRECTORY)
-        )
+        if self.idiot:
+            self.lm.logger.debug("Skipped Chroma index")
+        else:
+            chroma_chunks_content, chroma_chunks_ids = self._chroma_filter(
+                chunks_content, chunks_metadata, chunks_ids
+            )
+            chroma_added_chunks_count = len(chroma_chunks_ids)
+
+            if chroma_chunks_ids or self.delete_chunks_ids:
+                self._chroma_index(chroma_chunks_content, chroma_chunks_ids)
+                self.manifest.add_store(
+                    chunks_metadata, chroma_chunks_ids, "chroma"
+                )
+                self.lm.logger.debug(
+                    "Saved Chroma index to '%s'", str(CHROMA_DIRECTORY)
+                )
+            else:
+                self.lm.logger.debug("Skipped Chroma index")
 
         self.lm.logger.debug(
             "BM25 - indexed: %d",

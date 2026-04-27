@@ -275,6 +275,10 @@ class Searcher:
 
                 progress.advance(task_id)
 
+            progress.update(
+                task_id, description=f"[green]Searched [green]{total}/{total}"
+            )
+
         student_results = StudentSearchResults(
             search_results=results, k=self.k
         )
