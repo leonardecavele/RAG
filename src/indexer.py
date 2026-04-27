@@ -512,6 +512,27 @@ class Indexer:
         with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
             json.dump(self.manifest.model_dump(mode="json"), f, indent=4)
 
+    def _rich_index_summary(
+        self,
+        bm25_indexed_count: int,
+        chroma_deleted_chunks_count: int,
+        chroma_added_chunks_count: int,
+        chroma_updated_chunks_count: int,
+    ) -> None:
+        if not self._should_show_progress():
+            return
+
+        self.console.print(
+            "[cyan]BM25[/cyan] - "
+            f"indexed: [bold]{bm25_indexed_count}[/bold]"
+        )
+        self.console.print(
+            "[cyan]Chroma[/cyan] - "
+            f"deleted: [bold]{chroma_deleted_chunks_count}[/bold], "
+            f"added: [bold]{chroma_added_chunks_count}[/bold], "
+            f"updated: [bold]{chroma_updated_chunks_count}[/bold]"
+        )
+
     def index_directory(self) -> None:
         self.lm.logger.debug(
             "Indexing %s with chunk size %d",
@@ -631,4 +652,11 @@ class Indexer:
         self._store_manifest()
         self.lm.logger.debug(
             "Stored manifest file to '%s'", str(MANIFEST_PATH.parent)
+        )
+
+        self._rich_index_summary(
+            len(chunks_ids),
+            chroma_deleted_chunks_count,
+            chroma_added_chunks_count,
+            chroma_updated_chunks_count,
         )
