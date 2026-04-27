@@ -179,11 +179,7 @@ class Answerer:
         )
 
         user_prompt = "\n".join([
-            "Context:",
-            context,
-            "",
-            "Question:",
-            query,
+            "Context:", context, "", "Question:", query
         ])
 
         messages = [
@@ -192,21 +188,17 @@ class Answerer:
         ]
 
         text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
+            messages, tokenize=False,
             add_generation_prompt=True,
             enable_thinking=False,
         )
 
         inputs = self.tokenizer(
-            text,
-            return_tensors="pt",
+            text, return_tensors="pt",
         ).to(self._input_device())
 
         streamer = TextIteratorStreamer(
-            self.tokenizer,
-            skip_prompt=True,
-            skip_special_tokens=True,
+            self.tokenizer, skip_prompt=True, skip_special_tokens=True,
         )
 
         generation_kwargs: dict[str, Any] = {
@@ -219,8 +211,7 @@ class Answerer:
         }
 
         thread = Thread(
-            target=self.llm_model.generate,
-            kwargs=generation_kwargs,
+            target=self.llm_model.generate, kwargs=generation_kwargs,
         )
         thread.start()
 
