@@ -169,9 +169,12 @@ class Manifest(BaseModel):
             manifest_file.chunks_ids.add(chunk_id)
             manifest_file.stores.add(store)
 
-    def sync_files(self, files: list[Path]) -> tuple[list[str], set[str]]:
+    def sync_files(
+        self, files: list[Path]
+    ) -> tuple[list[str], set[str], set[str]]:
         delete_chunks_ids: list[str] = []
         updated_files_ids: set[str] = set()
+        new_files_ids: set[str] = set()
 
         for file in files:
             file_id: str = md5sum(str(file))
@@ -190,7 +193,7 @@ class Manifest(BaseModel):
                     chunks_ids=set(),
                 )
                 manifest_files[file_id] = manifest_file
-                updated_files_ids.add(file_id)
+                new_files_ids.add(file_id)
 
             elif manifest_file.file_hash != file_hash:
                 delete_chunks_ids.extend(manifest_file.chunks_ids)
@@ -201,7 +204,7 @@ class Manifest(BaseModel):
             manifest_file.file_path = str(file)
             manifest_file.file_hash = file_hash
 
-        return delete_chunks_ids, updated_files_ids
+        return delete_chunks_ids, updated_files_ids, new_files_ids
 
 
 class Indexer:
@@ -221,6 +224,7 @@ class Indexer:
         self.extensions = self._parse_extensions(extensions)
         self.delete_chunks_ids: list[str] = []
         self.updated_files_ids: set[str] = set()
+        self.new_files_ids: set[str] = set()
 
         if not self.directory_path.exists():
             raise FileNotFoundError(
@@ -366,6 +370,9 @@ class Indexer:
 
         chroma_store_missing: bool = not CHROMA_DIRECTORY.exists()
 
+        if self.idiot and chroma_store_missing:
+            return chroma_chunks_content, chroma_chunks_ids
+
         for content, chunk_id in zip(chunks_content, chunks_ids):
             metadata = chunks_metadata[chunk_id]
 
@@ -381,6 +388,9 @@ class Indexer:
             if manifest_file is None:
                 continue
 
+            if self.idiot and file_id not in self.updated_files_ids:
+                continue
+
             if (
                 chroma_store_missing
                 or file_id in self.updated_files_ids
@@ -391,6 +401,23 @@ class Indexer:
                 chroma_chunks_ids.append(chunk_id)
 
         return chroma_chunks_content, chroma_chunks_ids
+
+    def _count_updated_chroma_chunks(
+        self, chunks_metadata: dict[str, dict[str, Any]],
+        chunks_ids: list[str]
+    ) -> int:
+        count: int = 0
+
+        for chunk_id in chunks_ids:
+            metadata = chunks_metadata[chunk_id]
+
+            file_path = Path(metadata["file_path"])
+            file_id: str = md5sum(str(file_path))
+
+            if file_id in self.updated_files_ids:
+                count += 1
+
+        return count
 
     def _should_show_progress(self) -> bool:
         return (
@@ -522,12 +549,12 @@ class Indexer:
             )
 
         # sync manifest files
-        delete_chunks_ids, updated_files_ids = self.manifest.sync_files(files)
+        delete_chunks_ids, updated_files_ids, new_files_ids = (
+            self.manifest.sync_files(files)
+        )
         self.delete_chunks_ids.extend(delete_chunks_ids)
         self.updated_files_ids.update(updated_files_ids)
-        chroma_updated_chunks_count: int = (
-            len(self.delete_chunks_ids) - chroma_deleted_chunks_count
-        )
+        self.new_files_ids.update(new_files_ids)
 
         # chunk files
         try:
@@ -551,25 +578,35 @@ class Indexer:
 
         # save chroma database
         chroma_added_chunks_count: int = 0
+        chroma_updated_chunks_count: int = 0
+        chroma_chunks_content, chroma_chunks_ids = self._chroma_filter(
+            chunks_content, chunks_metadata, chunks_ids
+        )
 
-        if self.idiot:
-            self.lm.logger.debug("Skipped Chroma index")
-        else:
-            chroma_chunks_content, chroma_chunks_ids = self._chroma_filter(
-                chunks_content, chunks_metadata, chunks_ids
+        chroma_updated_chunks_count = self._count_updated_chroma_chunks(
+            chunks_metadata, chroma_chunks_ids
+        )
+        chroma_added_chunks_count = (
+            len(chroma_chunks_ids) - chroma_updated_chunks_count
+        )
+
+        if chroma_chunks_ids or self.delete_chunks_ids:
+            self._chroma_index(chroma_chunks_content, chroma_chunks_ids)
+            self.manifest.add_store(
+                chunks_metadata, chroma_chunks_ids, "chroma"
             )
-            chroma_added_chunks_count = len(chroma_chunks_ids)
 
-            if chroma_chunks_ids or self.delete_chunks_ids:
-                self._chroma_index(chroma_chunks_content, chroma_chunks_ids)
-                self.manifest.add_store(
-                    chunks_metadata, chroma_chunks_ids, "chroma"
-                )
+            if chroma_chunks_ids:
                 self.lm.logger.debug(
                     "Saved Chroma index to '%s'", str(CHROMA_DIRECTORY)
                 )
             else:
-                self.lm.logger.debug("Skipped Chroma index")
+                self.lm.logger.debug(
+                    "Deleted stale Chroma chunks from '%s'",
+                    str(CHROMA_DIRECTORY)
+                )
+        else:
+            self.lm.logger.debug("Skipped Chroma index")
 
         self.lm.logger.debug(
             "BM25 - indexed: %d",
@@ -579,7 +616,7 @@ class Indexer:
         self.lm.logger.debug(
             "Chroma - deleted: %d, added: %d, updated: %d",
             chroma_deleted_chunks_count,
-            max(0, chroma_added_chunks_count - chroma_updated_chunks_count),
+            chroma_added_chunks_count,
             chroma_updated_chunks_count,
         )
 
