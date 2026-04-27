@@ -29,7 +29,7 @@ from .translate import Translator
 from .searcher import Searcher
 
 
-MAX_INPUT_TOKENS: int = 2048
+MAX_INPUT_TOKENS: int = 4096
 MAX_NEW_TOKENS: int = 512
 STREAMER_TIMEOUT: float = 1.0
 
@@ -325,8 +325,9 @@ class Answerer:
             raise type(e)(f"Error with the arguments: {e}") from e
 
         try:
-            # missing progress bar
-            msr: MinimalSearchResults = s.search()
+            msr: MinimalSearchResults = s.search(
+                show_progress=self._should_show_progress()
+            )
         except ValidationError as e:
             raise ValueError(f"Error while searching: {e}") from e
         except (ValueError, FileNotFoundError, NotADirectoryError) as e:

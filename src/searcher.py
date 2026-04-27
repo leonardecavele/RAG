@@ -147,58 +147,119 @@ class Searcher:
             reverse=True,
         )
 
-    def search(self, show_bm25_progress: bool = False) -> MinimalSearchResults:
+    def search(
+        self,
+        show_progress: bool = False,
+        show_bm25_progress: bool = False
+    ) -> MinimalSearchResults:
         self.lm.logger.debug("Searching %r with k=%d", self.query, self.k)
 
-        self.translated_query = self.translator.translate_to_english(
-            self.query,
-        )
-        self.lm.logger.debug("Translated query: %s", self.translated_query)
-
         ids: list[tuple[list[str], float]] = []
+        show_rich_progress = show_progress and self._should_show_progress()
 
-        ids.append((
-            self._bm25_ids(show_progress=show_bm25_progress),
-            BM25_SCORE_WEIGHT,
-        ))
+        with Progress(
+            SpinnerColumn("shark", style="cyan"),
+            TextColumn("[black]{task.description}"),
+            BarColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=self.console,
+            transient=True,
+            disable=not show_rich_progress,
+        ) as progress:
+            task_id = progress.add_task(
+                "[black]Searching [cyan]0/5",
+                total=5,
+            )
 
-        if CHROMA_DIRECTORY.exists():
-            if CHROMA_DIRECTORY.is_dir():
-                try:
-                    ids.append((self._chroma_ids(), CHROMA_SCORE_WEIGHT))
-                except Exception as e:
-                    self.lm.logger.warning("Chroma search failed: %s", e)
-            else:
-                self.lm.logger.warning(
-                    "Chroma path exists but is not a directory: %s",
-                    CHROMA_DIRECTORY,
-                )
+            progress.update(
+                task_id,
+                description="[black]Searching [cyan]1/5 translating query",
+            )
+            self.translated_query = self.translator.translate_to_english(
+                self.query,
+            )
+            self.lm.logger.debug(
+                "Translated query: %s", self.translated_query
+            )
+            progress.advance(task_id)
 
-        merged_ids = self._rrf(ids)
-        selected_ids = merged_ids[:self.k]
-
-        self.lm.logger.debug("Selected ids: %s", selected_ids)
-
-        sources: list[MinimalSource] = []
-
-        for chunk_id in selected_ids:
-            md = self.chunks_metadata.get(chunk_id)
-            if md is None:
-                self.lm.logger.warning("Missing md for chunk id %s", chunk_id)
-                continue
-
-            try:
-                sources.append(
-                    MinimalSource(
-                        file_path=md["file_path"],
-                        first_character_index=md["first_character_index"],
-                        last_character_index=md["last_character_index"],
+            progress.update(
+                task_id,
+                description="[black]Searching [cyan]2/5 BM25",
+            )
+            ids.append((
+                self._bm25_ids(
+                    show_progress=(
+                        show_bm25_progress and not show_rich_progress
                     )
-                )
-            except KeyError as e:
-                raise ValueError(
-                    f"Invalid metadata for chunk id {chunk_id}: missing {e}"
-                ) from e
+                ),
+                BM25_SCORE_WEIGHT,
+            ))
+            progress.advance(task_id)
+
+            progress.update(
+                task_id,
+                description="[black]Searching [cyan]3/5 Chroma",
+            )
+            if CHROMA_DIRECTORY.exists():
+                if CHROMA_DIRECTORY.is_dir():
+                    try:
+                        ids.append((self._chroma_ids(), CHROMA_SCORE_WEIGHT))
+                    except Exception as e:
+                        self.lm.logger.warning("Chroma search failed: %s", e)
+                else:
+                    self.lm.logger.warning(
+                        "Chroma path exists but is not a directory: %s",
+                        CHROMA_DIRECTORY,
+                    )
+            progress.advance(task_id)
+
+            progress.update(
+                task_id,
+                description="[black]Searching [cyan]4/5 merging results",
+            )
+            merged_ids = self._rrf(ids)
+            selected_ids = merged_ids[:self.k]
+
+            self.lm.logger.debug("Selected ids: %s", selected_ids)
+            progress.advance(task_id)
+
+            progress.update(
+                task_id,
+                description="[black]Searching [cyan]5/5 building sources",
+            )
+            sources: list[MinimalSource] = []
+
+            for chunk_id in selected_ids:
+                md = self.chunks_metadata.get(chunk_id)
+                if md is None:
+                    self.lm.logger.warning(
+                        "Missing md for chunk id %s", chunk_id
+                    )
+                    continue
+
+                try:
+                    sources.append(
+                        MinimalSource(
+                            file_path=md["file_path"],
+                            first_character_index=md[
+                                "first_character_index"
+                            ],
+                            last_character_index=md["last_character_index"],
+                        )
+                    )
+                except KeyError as e:
+                    raise ValueError(
+                        f"Invalid metadata for chunk id {chunk_id}: "
+                        f"missing {e}"
+                    ) from e
+
+            progress.advance(task_id)
+            progress.update(
+                task_id,
+                description="[green]Searched [green]5/5",
+            )
 
         return MinimalSearchResults(
             question_id=self.question_id or str(uuid.uuid4()),
