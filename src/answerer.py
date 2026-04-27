@@ -1,13 +1,14 @@
 # standard imports
 import json
 import logging
+from pathlib import Path
 from queue import Empty, Queue
 from threading import Thread
 from typing import Any, Generator
 
 # extern imports
 import torch
-from pydantic import validate_call, ValidationError
+from pydantic import ValidationError, validate_call
 from rich.console import Console
 from rich.live import Live
 from rich.progress import (
@@ -20,10 +21,17 @@ from rich.text import Text
 from transformers import TextIteratorStreamer
 
 # local imports
-from .logger import LoggerManager
-from .types import MinimalAnswer, MinimalSearchResults
 from .defines import (
-    DEFAULT_DATASET_PATH, DEFAULT_SAVE_DIRECTORY, CHUNKS_METADATA_PATH
+    DEFAULT_DATASET_PATH,
+    DEFAULT_SAVE_DIRECTORY,
+    CHUNKS_METADATA_PATH,
+)
+from .logger import LoggerManager
+from .types import (
+    MinimalAnswer,
+    MinimalSearchResults,
+    StudentSearchResults,
+    StudentSearchResultsAndAnswer,
 )
 from .translate import Translator
 from .searcher import Searcher
@@ -37,12 +45,19 @@ STREAMER_TIMEOUT: float = 1.0
 class Answerer:
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
-        self, lm: LoggerManager, console: Console, embedding_model: Any,
-        translator: Translator, tokenizer: Any, llm_model: Any,
-        query: str = "", k: int = 5,
+        self,
+        lm: LoggerManager,
+        console: Console,
+        embedding_model: Any,
+        translator: Translator,
+        tokenizer: Any,
+        llm_model: Any,
+        query: str = "",
+        k: int = 5,
         dataset_path: str = DEFAULT_DATASET_PATH,
         save_directory: str = DEFAULT_SAVE_DIRECTORY,
         question_id: str = "",
+        search_dataset_path: str = DEFAULT_DATASET_PATH,
     ) -> None:
         self.lm = lm
         self.console = console
@@ -65,6 +80,7 @@ class Answerer:
         self.save_directory = save_directory
         self.k = k
         self.question_id = question_id
+        self.search_dataset_path = search_dataset_path
 
     def _should_show_progress(self) -> bool:
         return (
@@ -72,10 +88,16 @@ class Answerer:
             and not self.lm.logger.isEnabledFor(logging.INFO)
         )
 
-    def _context(self, msr: MinimalSearchResults) -> str:
+    def _context(
+        self,
+        msr: MinimalSearchResults,
+        show_progress: bool | None = None,
+    ) -> str:
         contexts: list[str] = []
         total = len(msr.retrieved_sources) + 1
-        show_progress = self._should_show_progress()
+
+        if show_progress is None:
+            show_progress = self._should_show_progress()
 
         with Progress(
             SpinnerColumn("shark", style="cyan"),
@@ -193,7 +215,9 @@ class Answerer:
         raise RuntimeError(f"Error while generating answer: {error}") from error
 
     def generate_answer(
-        self, query: str, context: str
+        self,
+        query: str,
+        context: str,
     ) -> Generator[str, None, None]:
         if not context.strip():
             yield "I could not find enough information to answer."
@@ -209,7 +233,7 @@ class Answerer:
         )
 
         user_prompt = "\n".join([
-            "Context:", context, "", "Question:", query
+            "Context:", context, "", "Question:", query,
         ])
 
         messages = [
@@ -218,7 +242,8 @@ class Answerer:
         ]
 
         text = self.tokenizer.apply_chat_template(
-            messages, tokenize=False,
+            messages,
+            tokenize=False,
             add_generation_prompt=True,
             enable_thinking=False,
         )
@@ -284,11 +309,18 @@ class Answerer:
         if not generation_errors.empty():
             self._raise_generation_error(generation_errors.get())
 
-    def _generate(self, query: str, context: str) -> str:
+    def _generate(
+        self,
+        query: str,
+        context: str,
+        show_live: bool | None = None,
+    ) -> str:
         answer = ""
-        show_progress = self._should_show_progress()
 
-        if not show_progress:
+        if show_live is None:
+            show_live = self._should_show_progress()
+
+        if not show_live:
             for chunk in self.generate_answer(query, context):
                 answer += chunk
 
@@ -353,3 +385,163 @@ class Answerer:
             retrieved_sources=msr.retrieved_sources,
             answer=answer,
         )
+
+    def _search_dataset_if_missing(self, dataset_path: Path) -> Path:
+        if dataset_path.exists():
+            return dataset_path
+
+        self.lm.logger.info(
+            "Search results not found at %s, running search_dataset first",
+            dataset_path,
+        )
+
+        search_dataset_path = Path(self.search_dataset_path)
+        if not search_dataset_path.exists():
+            raise FileNotFoundError(
+                f"Dataset file does not exist: {search_dataset_path}"
+            )
+        if not search_dataset_path.is_file():
+            raise FileNotFoundError(
+                f"Dataset path is not a file: {search_dataset_path}"
+            )
+
+        try:
+            searcher = Searcher(
+                lm=self.lm,
+                console=self.console,
+                embedding_model=self.embedding_model,
+                translator=self.translator,
+                dataset_path=str(search_dataset_path),
+                save_directory=str(dataset_path.parent),
+                k=self.k,
+            )
+        except (ValidationError, ValueError) as e:
+            raise ValueError(f"Error with the arguments: {e}") from e
+        except (FileNotFoundError, NotADirectoryError) as e:
+            raise type(e)(f"Error with the arguments: {e}") from e
+
+        try:
+            searcher.search_dataset()
+        except ValidationError as e:
+            raise ValueError(f"Error while searching: {e}") from e
+        except (ValueError, FileNotFoundError, NotADirectoryError) as e:
+            raise type(e)(f"Error while searching: {e}") from e
+
+        generated_path = dataset_path.parent / search_dataset_path.name
+
+        if not generated_path.exists():
+            raise FileNotFoundError(
+                f"Search results were not generated: {generated_path}"
+            )
+
+        return generated_path
+
+    def answer_dataset(self) -> None:
+        self.lm.logger.debug(
+            "Answering dataset %s with k=%d", self.dataset_path, self.k,
+        )
+
+        dataset_path = Path(self.dataset_path)
+        dataset_path = self._search_dataset_if_missing(dataset_path)
+
+        if not dataset_path.is_file():
+            raise FileNotFoundError(
+                f"Student search results path is not a file: {dataset_path}"
+            )
+
+        try:
+            with open(dataset_path, "r", encoding="utf-8") as f:
+                raw_results = json.load(f)
+
+            student_results = StudentSearchResults.model_validate(raw_results)
+
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Invalid JSON file: {dataset_path}"
+            ) from e
+
+        except ValidationError as e:
+            raise ValueError(
+                f"Invalid student search results format: {dataset_path}"
+            ) from e
+
+        results: list[MinimalAnswer] = []
+        total = len(student_results.search_results)
+        show_progress = self._should_show_progress()
+
+        with Progress(
+            SpinnerColumn("shark", style="cyan"),
+            TextColumn("{task.description}"),
+            TimeElapsedColumn(),
+            console=self.console,
+            disable=not show_progress,
+        ) as progress:
+            task_id = progress.add_task(
+                f"[black]Answering [cyan]0/{total}", total=total
+            )
+
+            for index, search_result in enumerate(
+                student_results.search_results,
+                start=1,
+            ):
+                progress.update(
+                    task_id,
+                    description=(
+                        f"[black]Answering [cyan]{index}/{total}"
+                    ),
+                )
+
+                context = self._context(search_result, show_progress=False)
+                query = self.translator.translate_to_english(
+                    search_result.question
+                )
+
+                self.lm.logger.debug("Query:\n%s", query)
+                self.lm.logger.debug("Context:\n%s", context)
+
+                try:
+                    answer = self._generate(
+                        query,
+                        context,
+                        show_live=False,
+                    )
+                except (ValueError, RuntimeError) as e:
+                    raise type(e)(
+                        f"Error while generating answer: {e}"
+                    ) from e
+
+                results.append(
+                    MinimalAnswer(
+                        question_id=search_result.question_id,
+                        question=search_result.question,
+                        retrieved_sources=search_result.retrieved_sources,
+                        answer=answer,
+                    )
+                )
+
+                progress.advance(task_id)
+
+            progress.update(
+                task_id,
+                description=f"[green]Answered [green]{total}/{total}",
+            )
+
+        student_answers = StudentSearchResultsAndAnswer(
+            search_results=results,
+            k=student_results.k,
+        )
+
+        save_directory = Path(self.save_directory)
+        if save_directory.exists() and not save_directory.is_dir():
+            raise NotADirectoryError(
+                f"Save directory path is not a directory: {save_directory}"
+            )
+
+        save_directory.mkdir(parents=True, exist_ok=True)
+
+        output_path = save_directory / dataset_path.name
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(student_answers.model_dump_json(indent=4))
+
+        self.lm.logger.info("Saved answers to %s", output_path)

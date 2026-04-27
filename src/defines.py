@@ -27,3 +27,6 @@ DEFAULT_DATASET_PATH: str = (
 DEFAULT_SAVE_DIRECTORY: str = (
     "data/output/search_results"
 )
+DEFAULT_RESULTS_PATH: str = (
+    "data/output/search_results/dataset_docs_public.json"
+)
