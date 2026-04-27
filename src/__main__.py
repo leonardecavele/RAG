@@ -2,9 +2,11 @@
 import os
 import sys
 import logging
+import inspect
 
 # extern imports
 import fire
+import torch
 from rich.console import Console
 from rich.theme import Theme
 from rich.progress import (
@@ -15,15 +17,17 @@ from rich.progress import (
 )
 from pydantic import ValidationError, TypeAdapter, PositiveInt
 from sentence_transformers import SentenceTransformer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # local imports
 from .error import ErrorCode
 from .logger import LoggerManager
 from .indexer import Indexer
 from .searcher import Searcher
+from .answerer import Answerer
 from .defines import (
     DEFAULT_VLLM, EMBEDDING_MODEL, DEFAULT_SAVE_DIRECTORY,
-    DEFAULT_DATASET_PATH, CHROMA_DIRECTORY
+    DEFAULT_DATASET_PATH, CHROMA_DIRECTORY, LLM_MODEL
 )
 from .display import print_msr
 from .translate import Translator
@@ -75,14 +79,14 @@ class CLI:
                 k=k
             )
         except (ValidationError, ValueError) as e:
-            raise ValueError(f"Error with the arguments: {e}") from e  # todo
+            raise ValueError(f"Error with the arguments: {e}") from e
         except (FileNotFoundError, NotADirectoryError) as e:
             raise type(e)(f"Error with the arguments: {e}") from e
 
         try:
             print_msr(self.console, s.search(), query)
         except ValidationError as e:
-            raise ValueError(f"Error while searching: {e}") from e  # to do
+            raise ValueError(f"Error while searching: {e}") from e
         except (ValueError, FileNotFoundError, NotADirectoryError) as e:
             raise type(e)(f"Error while searching: {e}") from e
 
@@ -105,14 +109,14 @@ class CLI:
                 k=k
             )
         except (ValidationError, ValueError) as e:
-            raise ValueError(f"Error with the arguments: {e}") from e  # todo
+            raise ValueError(f"Error with the arguments: {e}") from e
         except (FileNotFoundError, NotADirectoryError) as e:
             raise type(e)(f"Error with the arguments: {e}") from e
 
         try:
             s.search_dataset()
         except ValidationError as e:
-            raise ValueError(f"Error while searching: {e}") from e  # to do
+            raise ValueError(f"Error while searching: {e}") from e
         except (ValueError, FileNotFoundError, NotADirectoryError) as e:
             raise type(e)(f"Error while searching: {e}") from e
 
@@ -122,8 +126,43 @@ class CLI:
     ) -> None:
         query = TypeAdapter(str).validate_python(query)
         k = TypeAdapter(PositiveInt).validate_python(k)
+
         self._init_logger(level, library_level)
-        self.lm.logger.debug("Answering %r with k=%d", query, k)
+        self._init_console()
+        self._load_models()
+
+        try:
+            a = Answerer(
+                query=query,
+                lm=self.lm,
+                console=self.console,
+                embedding_model=self.embedding_model,
+                translator=self.translator,
+                tokenizer=self.tokenizer,
+                llm_model=self.llm_model,
+                k=k
+            )
+        except (ValidationError, ValueError) as e:
+            raise ValueError(f"Error with the arguments: {e}") from e
+        except (FileNotFoundError, NotADirectoryError) as e:
+            raise type(e)(f"Error with the arguments: {e}") from e
+
+        try:
+            a.answer()
+        except ValidationError as e:
+            raise ValueError(f"Error while answering: {e}") from e
+        except (ValueError, FileNotFoundError, NotADirectoryError) as e:
+            raise type(e)(f"Error while answering: {e}") from e
+
+    def _called_from(self, function_name: str) -> bool:
+        frame = inspect.currentframe()
+
+        while frame is not None:
+            if frame.f_code.co_name == function_name:
+                return True
+            frame = frame.f_back
+
+        return False
 
     def _should_show_loader(self) -> bool:
         return (
@@ -161,9 +200,26 @@ class CLI:
 
     def _init_models(self) -> None:
         self.embedding_model = None
+        self.tokenizer = None
+        self.llm_model = None
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
         if CHROMA_DIRECTORY.exists():
-            self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
+            self.embedding_model = SentenceTransformer(
+                EMBEDDING_MODEL,
+                device=device,
+            )
+
         self.translator = Translator()
+
+        if self._called_from("answer"):
+            self.tokenizer = AutoTokenizer.from_pretrained(LLM_MODEL)
+            self.llm_model = AutoModelForCausalLM.from_pretrained(
+                LLM_MODEL,
+                device_map="auto",
+            )
+            self.llm_model.eval()
 
 
 def main() -> ErrorCode:
