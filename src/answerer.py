@@ -1,10 +1,12 @@
 # standard imports
 import json
 import logging
+from queue import Empty, Queue
 from threading import Thread
 from typing import Any, Generator
 
 # extern imports
+import torch
 from pydantic import validate_call, ValidationError
 from rich.console import Console
 from rich.live import Live
@@ -25,6 +27,11 @@ from .defines import (
 )
 from .translate import Translator
 from .searcher import Searcher
+
+
+MAX_INPUT_TOKENS: int = 2048
+MAX_NEW_TOKENS: int = 512
+STREAMER_TIMEOUT: float = 1.0
 
 
 class Answerer:
@@ -162,6 +169,29 @@ class Answerer:
     def _input_device(self) -> Any:
         return next(self.llm_model.parameters()).device
 
+    @staticmethod
+    def _is_cuda_oom(error: BaseException) -> bool:
+        return (
+            isinstance(error, torch.OutOfMemoryError)
+            or (
+                isinstance(error, RuntimeError)
+                and "out of memory" in str(error).lower()
+            )
+        )
+
+    def _raise_generation_error(self, error: BaseException) -> None:
+        if self._is_cuda_oom(error):
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            raise RuntimeError(
+                "CUDA out of memory while generating the answer. "
+                "Try reducing -k, reducing chunk_size, reducing "
+                "MAX_INPUT_TOKENS, or using a smaller/quantized model."
+            ) from error
+
+        raise RuntimeError(f"Error while generating answer: {error}") from error
+
     def generate_answer(
         self, query: str, context: str
     ) -> Generator[str, None, None]:
@@ -193,32 +223,66 @@ class Answerer:
             enable_thinking=False,
         )
 
-        inputs = self.tokenizer(
-            text, return_tensors="pt",
-        ).to(self._input_device())
+        inputs = self.tokenizer(text, return_tensors="pt")
+        input_tokens_count: int = int(inputs["input_ids"].shape[-1])
+
+        if input_tokens_count > MAX_INPUT_TOKENS:
+            raise ValueError(
+                "Prompt is too large for safe local generation: "
+                f"{input_tokens_count} tokens, max is {MAX_INPUT_TOKENS}. "
+                "Try reducing -k or chunk_size."
+            )
+
+        inputs = inputs.to(self._input_device())
 
         streamer = TextIteratorStreamer(
-            self.tokenizer, skip_prompt=True, skip_special_tokens=True,
+            self.tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
+            timeout=STREAMER_TIMEOUT,
         )
 
         generation_kwargs: dict[str, Any] = {
             **inputs,
             "streamer": streamer,
-            "max_new_tokens": 512,
+            "max_new_tokens": MAX_NEW_TOKENS,
             "temperature": 0.3,
             "do_sample": True,
             "pad_token_id": self.tokenizer.eos_token_id,
         }
 
-        thread = Thread(
-            target=self.llm_model.generate, kwargs=generation_kwargs,
-        )
+        generation_errors: Queue[BaseException] = Queue()
+
+        def _generate() -> None:
+            try:
+                with torch.inference_mode():
+                    self.llm_model.generate(**generation_kwargs)
+            except BaseException as e:
+                generation_errors.put(e)
+                try:
+                    streamer.end()
+                except Exception:
+                    pass
+
+        thread = Thread(target=_generate, daemon=True)
         thread.start()
 
-        for new_text in streamer:
+        while True:
+            try:
+                new_text = next(streamer)
+            except StopIteration:
+                break
+            except Empty:
+                if not thread.is_alive():
+                    break
+                continue
+
             yield new_text
 
         thread.join()
+
+        if not generation_errors.empty():
+            self._raise_generation_error(generation_errors.get())
 
     def _generate(self, query: str, context: str) -> str:
         answer = ""
@@ -261,6 +325,7 @@ class Answerer:
             raise type(e)(f"Error with the arguments: {e}") from e
 
         try:
+            # missing progress bar
             msr: MinimalSearchResults = s.search()
         except ValidationError as e:
             raise ValueError(f"Error while searching: {e}") from e
@@ -273,7 +338,10 @@ class Answerer:
         self.lm.logger.debug("Query:\n%s", query)
         self.lm.logger.debug("Context:\n%s", context)
 
-        answer = self._generate(query, context)
+        try:
+            answer = self._generate(query, context)
+        except (ValueError, RuntimeError) as e:
+            raise type(e)(f"Error while generating answer: {e}") from e
 
         if not self._should_show_progress():
             self.console.print(answer)
