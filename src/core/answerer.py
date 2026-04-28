@@ -21,19 +21,19 @@ from rich.text import Text
 from transformers import TextIteratorStreamer
 
 # local imports
-from .defines import (
+from ..defines import (
     DEFAULT_DATASET_PATH,
     DEFAULT_SAVE_DIRECTORY,
     CHUNKS_METADATA_PATH,
 )
-from .logger import LoggerManager
-from .models import (
+from ..utils.logger import LoggerManager
+from ..schemas.models import (
     MinimalAnswer,
     MinimalSearchResults,
     StudentSearchResults,
     StudentSearchResultsAndAnswer,
 )
-from .translator import Translator
+from ..services.translator import Translator
 from .searcher import Searcher
 
 

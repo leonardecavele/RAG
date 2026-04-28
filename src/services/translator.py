@@ -2,7 +2,7 @@
 from transformers import pipeline
 
 # local imports
-from .defines import TRANSLATION_MODEL
+from ..defines import TRANSLATION_MODEL
 
 
 class Translator:

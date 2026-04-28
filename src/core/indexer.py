@@ -26,10 +26,10 @@ from pydantic import (
 )
 
 # local imports
-from .text_splitter import TextSplitter
-from .logger import LoggerManager
-from .hash import md5sum, file_md5sum
-from .defines import (
+from ..utils.text_splitter import TextSplitter
+from ..utils.logger import LoggerManager
+from ..utils.hash import md5sum, file_md5sum
+from ..defines import (
     OUTPUT_DIRECTORY, BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH,
     MANIFEST_PATH, MAX_BATCH_SIZE, EMBEDDING_MODEL, DEFAULT_VLLM
 )

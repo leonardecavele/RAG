@@ -20,16 +20,16 @@ from rich.progress import (
 )
 
 # local imports
-from .defines import (
+from ..defines import (
     BM25_DIRECTORY,
     CHROMA_DIRECTORY,
     CHUNKS_METADATA_PATH,
     DEFAULT_DATASET_PATH,
     DEFAULT_SAVE_DIRECTORY,
 )
-from .logger import LoggerManager
-from .translator import Translator
-from .models import (
+from ..utils.logger import LoggerManager
+from ..services.translator import Translator
+from ..schemas.models import (
     MinimalSearchResults,
     MinimalSource,
     RagDataset,

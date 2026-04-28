@@ -5,7 +5,7 @@ from rich.rule import Rule
 from rich.text import Text
 
 # local imports
-from .models import MinimalSearchResults
+from ..schemas.models import MinimalSearchResults
 
 
 def print_msr(
