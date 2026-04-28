@@ -20,7 +20,7 @@ from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # local imports
-from .error import ErrorCode
+from .error import ErrorCode, print_validation_error, error_code
 from .logger import LoggerManager
 from .indexer import Indexer
 from .searcher import Searcher
@@ -263,12 +263,18 @@ def main() -> ErrorCode:
 
     try:
         fire.Fire(CLI())
+
     except ValidationError as e:
-        print(f"{type(e).__name__}: {e.errors()[0]['msg']}")
+        print_validation_error(e)
         return ErrorCode.ARGS_ERROR
+
+    except KeyboardInterrupt:
+        print("Interrupted", file=sys.stderr)
+        return ErrorCode.INTERRUPTED
+
     except Exception as e:
         print(f"{type(e).__name__}: {e}", file=sys.stderr)
-        return ErrorCode.ARGS_ERROR
+        return error_code(e)
 
     return ErrorCode.NO_ERROR
 
