@@ -19,7 +19,7 @@ TRANSLATION_MODEL: str = (
 )
 LLM_MODEL = "Qwen/Qwen3-0.6B"
 
-DEFAULT_VLLM: str = "vllm-0.10.1"
+DEFAULT_VLLM: str = "data/raw/vllm-0.10.1"
 
 DEFAULT_DATASET_PATH: str = (
     "datasets_public/public/UnansweredQuestions/dataset_code_public.json"

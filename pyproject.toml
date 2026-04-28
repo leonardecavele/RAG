@@ -11,6 +11,7 @@ dependencies = [
 	"fire>=0.7.1",
 	"langchain>=1.2.15",
 	"langchain-text-splitters>=1.1.1",
+	"langdetect>=1.0.9",
 	"pydantic>=2.13.2",
 	"rich>=15.0.0",
 	"sacremoses>=0.1.1",
