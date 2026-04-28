@@ -98,7 +98,7 @@ class Indexer:
         return files
 
     def _load_document(self, path: Path) -> Document:
-        content: str = path.read_text(encoding="utf-8", errors="ignore")
+        content: str = path.read_text(encoding="utf-8", errors="strict")
         return Document(
             page_content=content,
             metadata={"source": str(path), "suffix": path.suffix},
@@ -115,8 +115,16 @@ class Indexer:
         for file in files:
             file_id: str = md5sum(str(file))
 
-            doc: Document = self._load_document(file)
-            # self.lm.logger.debug("Loaded '%s' file", str(file))
+            try:
+                doc: Document = self._load_document(file)
+            except UnicodeDecodeError:
+                self.lm.logger.warning("Skipped non UTF-8 file: %s", str(file))
+                continue
+            except OSError as e:
+                self.lm.logger.warning(
+                    "Skipped unreadable file %s: %s", str(file), e
+                )
+                continue
 
             splitter: TextSplitter = TextSplitter.from_filename(
                 str(file), chunk_size=self.chunk_size,
