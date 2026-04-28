@@ -529,8 +529,7 @@ class Answerer:
             )
 
         student_answers = StudentSearchResultsAndAnswer(
-            search_results=results,
-            k=student_results.k,
+            search_results=results, k=student_results.k,
         )
 
         save_directory = Path(self.save_directory)

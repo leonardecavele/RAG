@@ -20,191 +20,19 @@ from rich.progress import (
 )
 from sentence_transformers import SentenceTransformer
 from langchain_core.documents import Document
-from pydantic import (
-    validate_call, PositiveInt, BaseModel,
-    Field, ValidationError, ConfigDict
-)
+from pydantic import validate_call, PositiveInt, ValidationError
 
 # local
 from ..utils.text_splitter import TextSplitter
 from ..utils.logger import LoggerManager
-from ..utils.hash import md5sum, file_md5sum
+from ..utils.hash import md5sum
 from ..defines import (
     OUTPUT_DIRECTORY, BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH,
-    MANIFEST_PATH, MAX_BATCH_SIZE, EMBEDDING_MODEL, DEFAULT_VLLM
+    MANIFEST_PATH, MAX_BATCH_SIZE, EMBEDDING_MODEL
 )
+from ..schemas.models import ChunkMetadata
+from ..schemas.manifest import Manifest
 
-
-class ChunkMetadata(BaseModel):
-    content: str
-    file_path: str
-    first_character_index: int = Field(0, ge=0)
-    last_character_index: int = Field(0, ge=0)
-
-
-class CachedFile(BaseModel):
-    stores: set[str] = Field(default_factory=set)
-    file_path: str
-    file_hash: str
-    chunks_ids: set[str]
-
-
-class Manifest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    chunk_size: int = Field(0, ge=0)
-    llm_model: str = EMBEDDING_MODEL
-    extensions: list[str] = Field(default_factory=list)
-    vllm: str = DEFAULT_VLLM
-    files_by_extensions: dict[str, dict[str, CachedFile]] = Field(
-        default_factory=dict
-    )
-
-    @staticmethod
-    def existing_manifest_data() -> dict[str, Any]:
-        if not MANIFEST_PATH.exists():
-            return {}
-
-        if not MANIFEST_PATH.is_file():
-            raise FileNotFoundError(
-                f"Manifest path is not a file: {MANIFEST_PATH}"
-            )
-
-        try:
-            with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
-                manifest_data = json.load(f)
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"Invalid manifest JSON file: {MANIFEST_PATH}"
-            ) from e
-
-        if not isinstance(manifest_data, dict):
-            raise ValueError(
-                f"Invalid manifest format: expected object in {MANIFEST_PATH}"
-            )
-
-        return manifest_data
-
-    def _remove_extensions(self, extensions: set[str]) -> list[str]:
-        delete_chunks_ids: list[str] = []
-
-        for ext in list(self.files_by_extensions.keys()):
-            if "*" not in extensions and ext not in extensions:
-                for cached_file in self.files_by_extensions[ext].values():
-                    delete_chunks_ids.extend(cached_file.chunks_ids)
-
-                del self.files_by_extensions[ext]
-
-                if ext in self.extensions:
-                    self.extensions.remove(ext)
-
-        return delete_chunks_ids
-
-    def _remove_missing_files(self) -> list[str]:
-        delete_chunks_ids: list[str] = []
-
-        for ext in list(self.files_by_extensions.keys()):
-            for file_id in list(self.files_by_extensions[ext].keys()):
-                cached_file = self.files_by_extensions[ext][file_id]
-                path = Path(cached_file.file_path)
-
-                if not path.exists():
-                    delete_chunks_ids.extend(cached_file.chunks_ids)
-                    del self.files_by_extensions[ext][file_id]
-
-            if not self.files_by_extensions[ext]:
-                del self.files_by_extensions[ext]
-
-                if ext in self.extensions:
-                    self.extensions.remove(ext)
-
-        return delete_chunks_ids
-
-    @classmethod
-    def load(
-        cls, chunk_size: int, extensions: set[str]
-    ) -> tuple["Manifest", list[str]]:
-        if not MANIFEST_PATH.exists():
-            return cls(chunk_size=chunk_size, llm_model=EMBEDDING_MODEL), []
-
-        manifest = cls(**cls.existing_manifest_data())
-        delete_chunks_ids: list[str] = []
-
-        if (
-            manifest.chunk_size != chunk_size
-            or manifest.llm_model != EMBEDDING_MODEL
-            or manifest.vllm != DEFAULT_VLLM
-        ):
-            for files_by_id in manifest.files_by_extensions.values():
-                for cached_file in files_by_id.values():
-                    delete_chunks_ids.extend(cached_file.chunks_ids)
-
-            return (
-                cls(chunk_size=chunk_size, llm_model=EMBEDDING_MODEL),
-                delete_chunks_ids
-            )
-
-        delete_chunks_ids.extend(manifest._remove_extensions(extensions))
-        delete_chunks_ids.extend(manifest._remove_missing_files())
-
-        return manifest, delete_chunks_ids
-
-    def add_store(
-        self, chunks_metadata: dict[str, dict[str, Any]],
-        chunks_ids: list[str], store: str,
-    ) -> None:
-        for chunk_id in chunks_ids:
-            metadata = chunks_metadata[chunk_id]
-
-            file_path = Path(metadata["file_path"])
-            file_id: str = md5sum(str(file_path))
-            file_suffix: str = file_path.suffix.removeprefix(".").lower()
-
-            manifest_files = self.files_by_extensions.get(file_suffix, {})
-            manifest_file = manifest_files.get(file_id)
-
-            if manifest_file is None:
-                continue
-
-            manifest_file.chunks_ids.add(chunk_id)
-            manifest_file.stores.add(store)
-
-    def sync_files(
-        self, files: list[Path]
-    ) -> tuple[list[str], set[str], set[str]]:
-        delete_chunks_ids: list[str] = []
-        updated_files_ids: set[str] = set()
-        new_files_ids: set[str] = set()
-
-        for file in files:
-            file_id: str = md5sum(str(file))
-            file_hash: str = file_md5sum(file)
-            file_suffix: str = file.suffix.removeprefix(".").lower()
-
-            manifest_files = self.files_by_extensions.setdefault(
-                file_suffix, {}
-            )
-            manifest_file = manifest_files.get(file_id)
-
-            if manifest_file is None:
-                manifest_file = CachedFile(
-                    file_path=str(file),
-                    file_hash=file_hash,
-                    chunks_ids=set(),
-                )
-                manifest_files[file_id] = manifest_file
-                new_files_ids.add(file_id)
-
-            elif manifest_file.file_hash != file_hash:
-                delete_chunks_ids.extend(manifest_file.chunks_ids)
-                manifest_file.chunks_ids = set()
-                manifest_file.stores.clear()
-                updated_files_ids.add(file_id)
-
-            manifest_file.file_path = str(file)
-            manifest_file.file_hash = file_hash
-
-        return delete_chunks_ids, updated_files_ids, new_files_ids
 
 
 class Indexer:
