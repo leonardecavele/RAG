@@ -263,7 +263,8 @@ class CLI:
                 device=device,
             )
 
-        self.translator = Translator()
+        if not (self._called_from("evaluate") or self._called_from("index")):
+            self.translator = Translator()
 
         if (
             self._called_from("answer")
