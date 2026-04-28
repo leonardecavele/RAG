@@ -19,7 +19,7 @@ from rich.progress import (
 )
 from sentence_transformers import SentenceTransformer
 from langchain_core.documents import Document
-from pydantic import validate_call, PositiveInt, ValidationError
+from pydantic import validate_call, PositiveInt, ValidationError, Field
 
 # local
 from ..utils.text_splitter import TextSplitter
@@ -47,7 +47,9 @@ class Indexer:
         lm: LoggerManager,
         console: Console,
         extensions: str = "*",
-        chunk_size: PositiveInt = DEFAULT_CHUNK_SIZE,
+        chunk_size: PositiveInt = Field(
+            DEFAULT_CHUNK_SIZE, le=DEFAULT_CHUNK_SIZE
+        ),
         idiot: bool = False,
     ) -> None:
         self.directory_path = Path(directory_path)
