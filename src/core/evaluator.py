@@ -15,10 +15,23 @@ from ..schemas.models import (
     StudentSearchResults,
 )
 from ..utils.logger import LoggerManager
-from ..defines import DEFAULT_CHUNK_SIZE
+from ..defines import (
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_UNANSWERED_QUESTIONS_PATH,
+)
+from ..services.translator import Translator
+from .searcher import Searcher
 
 
 OVERLAP_THRESHOLD: float = 0.05
+
+
+class _PassthroughTranslator(Translator):
+    def __init__(self) -> None:
+        pass
+
+    def translate_to_english(self, text: str) -> str:
+        return " ".join(text.split())
 
 
 class Evaluator:
@@ -75,6 +88,43 @@ class Evaluator:
                 f"Invalid student results format: "
                 f"{self.student_answer_path}"
             ) from e
+
+    def _unanswered_dataset_path(self) -> Path:
+        path = Path(str(self.dataset_path).replace(
+            "AnsweredQuestions",
+            "UnansweredQuestions",
+        ))
+
+        if path.exists():
+            return path
+
+        return Path(DEFAULT_UNANSWERED_QUESTIONS_PATH)
+
+    def _generate_student_results(self) -> None:
+        dataset_path = self._unanswered_dataset_path()
+        save_directory = self.student_answer_path.parent
+
+        self.console.print(
+            f"Student results file not found: {self.student_answer_path}"
+        )
+        self.console.print("Running search_dataset first")
+
+        searcher = Searcher(
+            lm=self.lm,
+            console=self.console,
+            embedding_model=None,
+            translator=_PassthroughTranslator(),
+            dataset_path=str(dataset_path),
+            save_directory=str(save_directory),
+            k=self.k,
+        )
+
+        searcher.search_dataset()
+
+        generated_path = save_directory / dataset_path.name
+
+        if generated_path.exists():
+            self.student_answer_path = generated_path
 
     @staticmethod
     def _range_length(source: MinimalSource) -> int:
@@ -186,6 +236,9 @@ class Evaluator:
         return total_score / len(expected_questions)
 
     def evaluate(self) -> dict[str, float]:
+        if not self.student_answer_path.exists():
+            self._generate_student_results()
+
         dataset = self._load_dataset()
         student_results = self._load_student_results()
         expected_questions = self._answered_questions(dataset)
