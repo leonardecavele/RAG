@@ -1,6 +1,5 @@
 # standard
 import json
-import logging
 import uuid
 from pathlib import Path
 from typing import Any
@@ -151,13 +150,12 @@ class Searcher:
 
     def search(
         self,
-        show_progress: bool = False,
+        show_progress: bool = True,
         show_bm25_progress: bool = False
     ) -> MinimalSearchResults:
         self.lm.logger.debug("Searching %r with k=%d", self.query, self.k)
 
         ids: list[tuple[list[str], float]] = []
-        show_rich_progress = show_progress and self._should_show_progress()
 
         with Progress(
             SpinnerColumn("shark", style="cyan"),
@@ -167,7 +165,7 @@ class Searcher:
             TimeRemainingColumn(),
             console=self.console,
             transient=True,
-            disable=not show_rich_progress,
+            disable=not show_progress,
         ) as progress:
             task_id = progress.add_task(
                 "[black]Searching [cyan]0/5",
@@ -193,7 +191,7 @@ class Searcher:
             ids.append((
                 self._bm25_ids(
                     show_progress=(
-                        show_bm25_progress and not show_rich_progress
+                        show_bm25_progress and not show_progress
                     )
                 ),
                 BM25_SCORE_WEIGHT,
@@ -269,12 +267,6 @@ class Searcher:
             retrieved_sources=sources,
         )
 
-    def _should_show_progress(self) -> bool:
-        return (
-            self.console.is_terminal
-            and not self.lm.logger.isEnabledFor(logging.INFO)
-        )
-
     def search_dataset(self) -> None:
         self.lm.logger.debug(
             "Searching in %s with k=%d", self.dataset_path, self.k,
@@ -308,7 +300,6 @@ class Searcher:
 
         results: list[MinimalSearchResults] = []
         total = len(dataset.rag_questions)
-        show_progress = self._should_show_progress()
 
         with Progress(
             SpinnerColumn("shark", style="cyan"),
@@ -317,7 +308,6 @@ class Searcher:
             TimeElapsedColumn(),
             TimeRemainingColumn(),
             console=self.console,
-            disable=not show_progress,
         ) as progress:
             task_id = progress.add_task(
                 f"[black]Searching [cyan]0/{total}", total=total
@@ -333,7 +323,10 @@ class Searcher:
                 self.query = question.question
                 self.question_id = question.question_id
 
-                result = self.search(show_bm25_progress=False)
+                result = self.search(
+                    show_progress=False,
+                    show_bm25_progress=False,
+                )
                 results.append(result)
 
                 progress.advance(task_id)

@@ -1,4 +1,4 @@
-# standard imports
+# standard
 import hashlib
 from pathlib import Path
 

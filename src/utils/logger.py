@@ -1,5 +1,8 @@
-# standard imports
+# standard
 import logging
+
+# extern
+from rich.logging import RichHandler
 
 
 class LoggerManager:
@@ -13,7 +16,16 @@ class LoggerManager:
     def __init__(self, level: str = "error") -> None:
         logging.basicConfig(
             level=logging.ERROR,
-            format="%(levelname)s: %(message)s",
+            format="%(message)s",
+            handlers=[
+                RichHandler(
+                    rich_tracebacks=True,
+                    show_time=False,
+                    show_path=False,
+                    markup=False,
+                )
+            ],
+            force=True,
         )
         self.logger: logging.Logger = logging.getLogger(__name__)
         self.set(level)
@@ -25,6 +37,7 @@ class LoggerManager:
     def library_level(self, level: str) -> None:
         normalized: str = self.normalize_level(level)
         log_level: int = self.LOG_LEVELS[normalized]
+        app_log_level: int = self.logger.level
 
         logging.getLogger().setLevel(log_level)
 
@@ -34,7 +47,7 @@ class LoggerManager:
 
             logging.getLogger(logger_name).setLevel(log_level)
 
-        self.logger.setLevel(self.logger.level)
+        self.logger.setLevel(app_log_level)
 
     def normalize_level(self, level: str) -> str:
         normalized: str = level.lower()

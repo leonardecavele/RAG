@@ -2,7 +2,6 @@
 import re
 import json
 import shutil
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -27,20 +26,28 @@ from ..utils.text_splitter import TextSplitter
 from ..utils.logger import LoggerManager
 from ..utils.hash import md5sum
 from ..defines import (
-    OUTPUT_DIRECTORY, BM25_DIRECTORY, CHROMA_DIRECTORY, CHUNKS_METADATA_PATH,
-    MANIFEST_PATH, MAX_BATCH_SIZE, EMBEDDING_MODEL
+    OUTPUT_DIRECTORY,
+    BM25_DIRECTORY,
+    CHROMA_DIRECTORY,
+    CHUNKS_METADATA_PATH,
+    MANIFEST_PATH,
+    MAX_BATCH_SIZE,
+    EMBEDDING_MODEL,
 )
 from ..schemas.models import ChunkMetadata
 from ..schemas.manifest import Manifest
 
 
-
 class Indexer:
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
-        self, directory_path: str, lm: LoggerManager, console: Console,
-        extensions: str = "*", chunk_size: PositiveInt = 2000,
-        idiot: bool = False
+        self,
+        directory_path: str,
+        lm: LoggerManager,
+        console: Console,
+        extensions: str = "*",
+        chunk_size: PositiveInt = 2000,
+        idiot: bool = False,
     ) -> None:
         self.directory_path = Path(directory_path)
 
@@ -89,6 +96,7 @@ class Indexer:
         for path in self.directory_path.rglob("*"):
             if not path.is_file():
                 continue
+
             extension: str = path.suffix.removeprefix(".").lower()
             if "*" not in self.extensions and extension not in self.extensions:
                 continue
@@ -105,9 +113,9 @@ class Indexer:
         )
 
     def _split_into_chunks(
-        self, files: list[Path]
+        self,
+        files: list[Path],
     ) -> tuple[list[str], dict[str, dict[str, Any]], list[str]]:
-
         chunks_content: list[str] = []
         chunks_metadata: dict[str, dict[str, Any]] = {}
         chunks_ids: list[str] = []
@@ -118,7 +126,9 @@ class Indexer:
             try:
                 doc: Document = self._load_document(file)
             except UnicodeDecodeError:
-                self.lm.logger.warning("Skipped non UTF-8 file: %s", str(file))
+                self.lm.logger.warning(
+                    "Skipped non UTF-8 file: %s", str(file)
+                )
                 continue
             except OSError as e:
                 self.lm.logger.warning(
@@ -127,7 +137,8 @@ class Indexer:
                 continue
 
             splitter: TextSplitter = TextSplitter.from_filename(
-                str(file), chunk_size=self.chunk_size,
+                str(file),
+                chunk_size=self.chunk_size,
             )
             file_chunks: list[Document] = splitter.split_documents([doc])
 
@@ -177,7 +188,9 @@ class Indexer:
         return chunks_content, chunks_metadata, chunks_ids
 
     def _bm25_index(
-        self, chunks_content: list[str], chunks_ids: list[dict[str, str]]
+        self,
+        chunks_content: list[str],
+        chunks_ids: list[dict[str, str]],
     ) -> None:
         if not chunks_content or not chunks_ids:
             raise ValueError("No chunks to index with BM25")
@@ -197,9 +210,10 @@ class Indexer:
         retriever.save(str(BM25_DIRECTORY))
 
     def _chroma_filter(
-        self, chunks_content: list[str],
+        self,
+        chunks_content: list[str],
         chunks_metadata: dict[str, dict[str, Any]],
-        chunks_ids: list[str]
+        chunks_ids: list[str],
     ) -> tuple[list[str], list[str]]:
         chroma_chunks_content: list[str] = []
         chroma_chunks_ids: list[str] = []
@@ -217,7 +231,8 @@ class Indexer:
             file_suffix: str = file_path.suffix.removeprefix(".").lower()
 
             manifest_files = self.manifest.files_by_extensions.get(
-                file_suffix, {}
+                file_suffix,
+                {},
             )
             manifest_file = manifest_files.get(file_id)
 
@@ -239,8 +254,9 @@ class Indexer:
         return chroma_chunks_content, chroma_chunks_ids
 
     def _count_updated_chroma_chunks(
-        self, chunks_metadata: dict[str, dict[str, Any]],
-        chunks_ids: list[str]
+        self,
+        chunks_metadata: dict[str, dict[str, Any]],
+        chunks_ids: list[str],
     ) -> int:
         count: int = 0
 
@@ -255,14 +271,10 @@ class Indexer:
 
         return count
 
-    def _should_show_progress(self) -> bool:
-        return (
-            self.console.is_terminal
-            and not self.lm.logger.isEnabledFor(logging.INFO)
-        )
-
     def _chroma_index(
-        self, chunks_content: list[str], chunks_ids: list[str]
+        self,
+        chunks_content: list[str],
+        chunks_ids: list[str],
     ) -> None:
         if CHROMA_DIRECTORY.exists() and not CHROMA_DIRECTORY.is_dir():
             raise NotADirectoryError(
@@ -288,7 +300,6 @@ class Indexer:
         )
 
         total = (len(chunks_content) + MAX_BATCH_SIZE - 1) // MAX_BATCH_SIZE
-        show_progress = self._should_show_progress()
 
         with Progress(
             SpinnerColumn("shark", style="cyan"),
@@ -297,7 +308,6 @@ class Indexer:
             TimeElapsedColumn(),
             TimeRemainingColumn(),
             console=self.console,
-            disable=not show_progress,
         ) as progress:
             task_id = progress.add_task(
                 f"[black]Embedding [cyan]0/{total}",
@@ -312,7 +322,7 @@ class Indexer:
                     task_id,
                     description=(
                         f"[black]Embedding [cyan]{batch_index}/{total}"
-                    )
+                    ),
                 )
 
                 batch_content = chunks_content[i:i + MAX_BATCH_SIZE]
@@ -331,11 +341,13 @@ class Indexer:
                 progress.advance(task_id)
 
             progress.update(
-                task_id, description=f"[green]Embedded [green]{total}/{total}"
+                task_id,
+                description=f"[green]Embedded [green]{total}/{total}",
             )
 
     def _store_chunks(
-        self, chunks_metadata: dict[str, dict[str, Any]]
+        self,
+        chunks_metadata: dict[str, dict[str, Any]],
     ) -> None:
         CHUNKS_METADATA_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -355,9 +367,6 @@ class Indexer:
         chroma_added_chunks_count: int,
         chroma_updated_chunks_count: int,
     ) -> None:
-        if not self._should_show_progress():
-            return
-
         self.console.print(
             "[cyan]BM25[/cyan] - "
             f"indexed: [bold]{bm25_indexed_count}[/bold]"
@@ -372,7 +381,8 @@ class Indexer:
     def index_directory(self) -> None:
         self.lm.logger.debug(
             "Indexing %s with chunk size %d",
-            str(self.directory_path), self.chunk_size
+            str(self.directory_path),
+            self.chunk_size,
         )
 
         # load or create manifest
@@ -389,8 +399,10 @@ class Indexer:
 
         # add missing extensions to the manifest
         self.manifest.extensions.extend(
-            [ext for ext in self.extensions
-             if ext not in self.manifest.extensions]
+            [
+                ext for ext in self.extensions
+                if ext not in self.manifest.extensions
+            ]
         )
 
         # collect corresponding files
@@ -398,6 +410,7 @@ class Indexer:
             files: list[Path] = self._collect_files()
         except OSError as e:
             raise type(e)(f"Error while collecting files: {e}") from e
+
         self.lm.logger.debug("Found %d files", len(files))
 
         if not files:
@@ -428,7 +441,8 @@ class Indexer:
 
         # save bm25 database
         self._bm25_index(
-            chunks_content, [{"id": chunk_id} for chunk_id in chunks_ids]
+            chunks_content,
+            [{"id": chunk_id} for chunk_id in chunks_ids],
         )
         self.manifest.add_store(chunks_metadata, chunks_ids, "bm25")
         self.lm.logger.debug("Saved BM25 index to '%s'", str(BM25_DIRECTORY))
@@ -437,11 +451,14 @@ class Indexer:
         chroma_added_chunks_count: int = 0
         chroma_updated_chunks_count: int = 0
         chroma_chunks_content, chroma_chunks_ids = self._chroma_filter(
-            chunks_content, chunks_metadata, chunks_ids
+            chunks_content,
+            chunks_metadata,
+            chunks_ids,
         )
 
         chroma_updated_chunks_count = self._count_updated_chroma_chunks(
-            chunks_metadata, chroma_chunks_ids
+            chunks_metadata,
+            chroma_chunks_ids,
         )
         chroma_added_chunks_count = (
             len(chroma_chunks_ids) - chroma_updated_chunks_count
@@ -450,7 +467,9 @@ class Indexer:
         if chroma_chunks_ids or self.delete_chunks_ids:
             self._chroma_index(chroma_chunks_content, chroma_chunks_ids)
             self.manifest.add_store(
-                chunks_metadata, chroma_chunks_ids, "chroma"
+                chunks_metadata,
+                chroma_chunks_ids,
+                "chroma",
             )
 
             if chroma_chunks_ids:
@@ -460,7 +479,7 @@ class Indexer:
             else:
                 self.lm.logger.debug(
                     "Deleted stale Chroma chunks from '%s'",
-                    str(CHROMA_DIRECTORY)
+                    str(CHROMA_DIRECTORY),
                 )
         else:
             self.lm.logger.debug("Skipped Chroma index")
@@ -481,13 +500,14 @@ class Indexer:
         self._store_chunks(chunks_metadata)
         self.lm.logger.debug(
             "Stored chunks content and metadata to '%s'",
-            str(OUTPUT_DIRECTORY)
+            str(OUTPUT_DIRECTORY),
         )
 
         # save manifest
         self._store_manifest()
         self.lm.logger.debug(
-            "Stored manifest file to '%s'", str(MANIFEST_PATH.parent)
+            "Stored manifest file to '%s'",
+            str(MANIFEST_PATH.parent),
         )
 
         self._rich_index_summary(

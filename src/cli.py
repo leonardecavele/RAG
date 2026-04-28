@@ -1,11 +1,8 @@
 # standard
-import os
-import sys
 import logging
 import inspect
 
 # extern
-import fire
 import torch
 from rich.console import Console
 from rich.theme import Theme
@@ -20,7 +17,6 @@ from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # local
-from .error import ErrorCode, print_validation_error, error_code
 from .utils.logger import LoggerManager
 from .core.indexer import Indexer
 from .core.searcher import Searcher
@@ -198,17 +194,7 @@ class CLI:
 
         return False
 
-    def _should_show_loader(self) -> bool:
-        return (
-            self.console.is_terminal
-            and not self.lm.logger.isEnabledFor(logging.INFO)
-        )
-
     def _load_models(self) -> None:
-        if not self._should_show_loader():
-            self._init_models()
-            return
-
         with Progress(
             SpinnerColumn("shark", style="cyan"),
             TextColumn("[black]{task.description}"),
@@ -257,28 +243,3 @@ class CLI:
                 device_map="auto",
             )
             self.llm_model.eval()
-
-
-def main() -> ErrorCode:
-    os.environ.setdefault("PAGER", "cat")
-
-    try:
-        fire.Fire(CLI())
-
-    except ValidationError as e:
-        print_validation_error(e)
-        return ErrorCode.ARGS_ERROR
-
-    except KeyboardInterrupt:
-        print("Interrupted", file=sys.stderr)
-        return ErrorCode.INTERRUPTED
-
-    except Exception as e:
-        print(f"{type(e).__name__}: {e}", file=sys.stderr)
-        return error_code(e)
-
-    return ErrorCode.NO_ERROR
-
-
-if __name__ == "__main__":
-    sys.exit(main().value)

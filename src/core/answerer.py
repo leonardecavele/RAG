@@ -1,6 +1,5 @@
 # standard
 import json
-import logging
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Thread
@@ -78,109 +77,71 @@ class Answerer:
         self.k = k
         self.question_id = question_id
 
-    def _should_show_progress(self) -> bool:
-        return (
-            self.console.is_terminal
-            and not self.lm.logger.isEnabledFor(logging.INFO)
-        )
-
-    def _context(
-        self,
-        msr: MinimalSearchResults,
-        show_progress: bool | None = None,
-    ) -> str:
+    def _context(self, msr: MinimalSearchResults) -> str:
         contexts: list[str] = []
-        total = len(msr.retrieved_sources) + 1
 
-        if show_progress is None:
-            show_progress = self._should_show_progress()
+        try:
+            with open(CHUNKS_METADATA_PATH, "r", encoding="utf-8") as f:
+                chunks_metadata: dict[str, dict[str, Any]] = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Invalid metadata JSON file: {CHUNKS_METADATA_PATH}"
+            ) from e
+        except OSError as e:
+            raise type(e)(
+                f"Error while reading chunks metadata: "
+                f"{CHUNKS_METADATA_PATH}"
+            ) from e
 
-        with Progress(
-            SpinnerColumn("shark", style="cyan"),
-            TextColumn("[black]{task.description}"),
-            TimeElapsedColumn(),
-            console=self.console,
-            transient=True,
-            disable=not show_progress,
-        ) as progress:
-            task_id = progress.add_task(
-                "Loading chunks metadata", total=total
+        metadata_by_source: dict[tuple[str, int, int], dict[str, Any]] = {}
+
+        for md in chunks_metadata.values():
+            try:
+                key = (
+                    md["file_path"],
+                    md["first_character_index"],
+                    md["last_character_index"],
+                )
+            except KeyError as e:
+                raise ValueError(
+                    f"Invalid chunk metadata: missing {e}"
+                ) from e
+
+            metadata_by_source[key] = md
+
+        for index, source in enumerate(msr.retrieved_sources, start=1):
+            key = (
+                source.file_path,
+                source.first_character_index,
+                source.last_character_index,
             )
+            md = metadata_by_source.get(key)
+
+            if md is None:
+                raise ValueError(
+                    f"Missing metadata for source: {source.file_path}"
+                )
 
             try:
-                with open(CHUNKS_METADATA_PATH, "r", encoding="utf-8") as f:
-                    chunks_metadata: dict[str, dict[str, Any]] = json.load(f)
-            except json.JSONDecodeError as e:
+                snippet = str(md["content"])
+            except KeyError as e:
                 raise ValueError(
-                    f"Invalid metadata JSON file: {CHUNKS_METADATA_PATH}"
-                ) from e
-            except OSError as e:
-                raise type(e)(
-                    f"Error while reading chunks metadata: "
-                    f"{CHUNKS_METADATA_PATH}"
+                    f"Invalid chunk metadata for source "
+                    f"{source.file_path}: missing {e}"
                 ) from e
 
-            metadata_by_source: dict[tuple[str, int, int], dict[str, Any]] = {}
-
-            for md in chunks_metadata.values():
-                try:
-                    key = (
-                        md["file_path"],
-                        md["first_character_index"],
-                        md["last_character_index"],
-                    )
-                except KeyError as e:
-                    raise ValueError(
-                        f"Invalid chunk metadata: missing {e}"
-                    ) from e
-
-                metadata_by_source[key] = md
-
-            progress.advance(task_id)
-
-            for index, source in enumerate(msr.retrieved_sources, start=1):
-                progress.update(
-                    task_id,
-                    description=(
-                        f"Building context "
-                        f"{index}/{len(msr.retrieved_sources)}"
-                    ),
-                )
-
-                key = (
-                    source.file_path,
-                    source.first_character_index,
-                    source.last_character_index,
-                )
-                md = metadata_by_source.get(key)
-
-                if md is None:
-                    raise ValueError(
-                        f"Missing metadata for source: {source.file_path}"
-                    )
-
-                try:
-                    snippet = str(md["content"])
-                except KeyError as e:
-                    raise ValueError(
-                        f"Invalid chunk metadata for source "
-                        f"{source.file_path}: missing {e}"
-                    ) from e
-
-                contexts.append(
-                    "\n".join([
-                        f"Source {index}:",
-                        f"file_path: {source.file_path}",
-                        f"first_character_index: "
-                        f"{source.first_character_index}",
-                        f"last_character_index: "
-                        f"{source.last_character_index}",
-                        "content:",
-                        snippet,
-                    ])
-                )
-
-                progress.advance(task_id)
+            contexts.append(
+                "\n".join([
+                    f"Source {index}:",
+                    f"file_path: {source.file_path}",
+                    f"first_character_index: "
+                    f"{source.first_character_index}",
+                    f"last_character_index: "
+                    f"{source.last_character_index}",
+                    "content:",
+                    snippet,
+                ])
+            )
 
         return "\n\n".join(contexts)
 
@@ -311,14 +272,11 @@ class Answerer:
         self,
         query: str,
         context: str,
-        show_live: bool | None = None,
+        live: bool = True,
     ) -> str:
         answer = ""
 
-        if show_live is None:
-            show_live = self._should_show_progress()
-
-        if not show_live:
+        if not live:
             for chunk in self.generate_answer(query, context):
                 answer += chunk
 
@@ -329,10 +287,10 @@ class Answerer:
             console=self.console,
             refresh_per_second=12,
             transient=False,
-        ) as live:
+        ) as live_display:
             for chunk in self.generate_answer(query, context):
                 answer += chunk
-                live.update(Text(answer, style="white"))
+                live_display.update(Text(answer, style="white"))
 
         return answer.strip()
 
@@ -355,27 +313,24 @@ class Answerer:
             raise type(e)(f"Error with the arguments: {e}") from e
 
         try:
-            msr: MinimalSearchResults = s.search(
-                show_progress=self._should_show_progress()
-            )
+            msr: MinimalSearchResults = s.search(show_progress=True)
         except ValidationError as e:
             raise ValueError(f"Error while searching: {e}") from e
         except (ValueError, FileNotFoundError, NotADirectoryError) as e:
             raise type(e)(f"Error while searching: {e}") from e
 
-        context = self._context(msr)
+        with self.console.status("[black]Building context", spinner="shark"):
+            context = self._context(msr)
+
         query = self.translator.translate_to_english(self.query)
 
         self.lm.logger.debug("Query:\n%s", query)
         self.lm.logger.debug("Context:\n%s", context)
 
         try:
-            answer = self._generate(query, context)
+            answer = self._generate(query, context, live=True)
         except (ValueError, RuntimeError) as e:
             raise type(e)(f"Error while generating answer: {e}") from e
-
-        if not self._should_show_progress():
-            self.console.print(answer)
 
         return MinimalAnswer(
             question_id=msr.question_id,
@@ -465,14 +420,12 @@ class Answerer:
 
         results: list[MinimalAnswer] = []
         total = len(student_results.search_results)
-        show_progress = self._should_show_progress()
 
         with Progress(
             SpinnerColumn("shark", style="cyan"),
             TextColumn("{task.description}"),
             TimeElapsedColumn(),
             console=self.console,
-            disable=not show_progress,
         ) as progress:
             task_id = progress.add_task(
                 f"[black]Answering [cyan]0/{total}", total=total
@@ -489,7 +442,7 @@ class Answerer:
                     ),
                 )
 
-                context = self._context(search_result, show_progress=False)
+                context = self._context(search_result)
                 query = self.translator.translate_to_english(
                     search_result.question
                 )
@@ -501,7 +454,7 @@ class Answerer:
                     answer = self._generate(
                         query,
                         context,
-                        show_live=False,
+                        live=False,
                     )
                 except (ValueError, RuntimeError) as e:
                     raise type(e)(
