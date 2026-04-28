@@ -9,7 +9,7 @@ RESET := $(ESC)[0m
 FLAKE8_SUCCESS := printf '%b\n' "$(BOLD)$(GREEN)Success: flake8$(RESET)"
 
 # structure
-DIRS := . src
+DIRS := . src src/core src/display src/schemas src/services src/utils
 ARGS ?=
 
 PYCACHES := $(addsuffix /__pycache__,$(DIRS))
