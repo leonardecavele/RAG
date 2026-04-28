@@ -29,8 +29,8 @@ from .defines import (
     DEFAULT_VLLM, EMBEDDING_MODEL, DEFAULT_SAVE_DIRECTORY,
     DEFAULT_DATASET_PATH, CHROMA_DIRECTORY, LLM_MODEL, DEFAULT_RESULTS_PATH
 )
-from .display import print_msr
-from .translate import Translator
+from .print import print_msr
+from .translator import Translator
 
 
 class CLI:

@@ -28,8 +28,8 @@ from .defines import (
     DEFAULT_SAVE_DIRECTORY,
 )
 from .logger import LoggerManager
-from .translate import Translator
-from .types import (
+from .translator import Translator
+from .models import (
     MinimalSearchResults,
     MinimalSource,
     RagDataset,

@@ -3,7 +3,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
-from .types import MinimalSearchResults
+
+# local imports
+from .models import MinimalSearchResults
 
 
 def print_msr(

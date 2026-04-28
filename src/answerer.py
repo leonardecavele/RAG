@@ -27,13 +27,13 @@ from .defines import (
     CHUNKS_METADATA_PATH,
 )
 from .logger import LoggerManager
-from .types import (
+from .models import (
     MinimalAnswer,
     MinimalSearchResults,
     StudentSearchResults,
     StudentSearchResultsAndAnswer,
 )
-from .translate import Translator
+from .translator import Translator
 from .searcher import Searcher
 
 
