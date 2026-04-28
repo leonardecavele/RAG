@@ -94,22 +94,37 @@ class Evaluator:
         )
         self.console.print("Running search_dataset first")
 
-        searcher = Searcher(
-            lm=self.lm,
-            console=self.console,
-            embedding_model=None,
-            translator=self.translator,
-            dataset_path=str(dataset_path),
-            save_directory=str(save_directory),
-            k=self.k,
-        )
+        try:
+            searcher = Searcher(
+                lm=self.lm,
+                console=self.console,
+                embedding_model=None,
+                translator=self.translator,
+                dataset_path=str(dataset_path),
+                save_directory=str(save_directory),
+                k=self.k,
+            )
 
-        searcher.search_dataset()
+            searcher.search_dataset()
+
+        except (ValidationError, ValueError) as e:
+            raise ValueError(
+                f"Error while generating search results: {e}"
+            ) from e
+
+        except (FileNotFoundError, NotADirectoryError) as e:
+            raise type(e)(
+                f"Error while generating search results: {e}"
+            ) from e
 
         generated_path = save_directory / dataset_path.name
 
-        if generated_path.exists():
-            self.student_answer_path = generated_path
+        if not generated_path.exists():
+            raise FileNotFoundError(
+                f"Search results were not generated: {generated_path}"
+            )
+
+        self.student_answer_path = generated_path
 
     @staticmethod
     def _range_length(source: MinimalSource) -> int:
@@ -187,11 +202,15 @@ class Evaluator:
         student_results: StudentSearchResults,
         k: int,
     ) -> float:
-        if not expected_questions:
+        total_expected_sources = sum(
+            len(question.sources)
+            for question in expected_questions.values()
+        )
+
+        if total_expected_sources == 0:
             return 0.0
 
-        total_score = 0.0
-
+        total_found = 0.0
         for result in student_results.search_results:
             expected = expected_questions.get(result.question_id)
 
@@ -199,9 +218,9 @@ class Evaluator:
                 continue
 
             retrieved_sources = result.retrieved_sources[:k]
-            total_score += self._question_score(expected, retrieved_sources)
+            total_found += self._question_score(expected, retrieved_sources)
 
-        return total_score / len(expected_questions)
+        return total_found / total_expected_sources
 
     def evaluate(self) -> dict[str, float]:
         if not self.student_answer_path.exists():
