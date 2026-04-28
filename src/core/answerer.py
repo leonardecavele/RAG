@@ -35,7 +35,7 @@ from .searcher import Searcher
 
 
 MAX_INPUT_TOKENS: int = 4096
-MAX_NEW_TOKENS: int = 128
+MAX_NEW_TOKENS: int = 80
 STREAMER_TIMEOUT: float = 1.0
 
 
@@ -132,13 +132,9 @@ class Answerer:
 
             contexts.append(
                 "\n".join([
-                    f"Source {index}:",
-                    f"file_path: {source.file_path}",
-                    f"first_character_index: "
-                    f"{source.first_character_index}",
-                    f"last_character_index: "
-                    f"{source.last_character_index}",
-                    "content:",
+                    f"[Source {index}] {source.file_path} "
+                    f"({source.first_character_index}- "
+                    f"{source.last_character_index})",
                     snippet,
                 ])
             )
@@ -174,21 +170,17 @@ class Answerer:
         ) from error
 
     def generate_answer(
-        self,
-        query: str,
-        context: str,
+        self, query: str, context: str
     ) -> Generator[str, None, None]:
         if not context.strip():
             yield "I could not find enough information to answer."
             return
 
         system_prompt = (
-            "You are an expert AI assistant. Answer the user's question "
-            "based ONLY on the provided context below. If the answer cannot "
-            "be found in the context, state it clearly without making up "
-            "information. Do not include reasoning, analysis, or hidden "
-            "thoughts. Mention the relevant source file when it supports "
-            "the answer."
+            "Answer in 1 to 4 sentences. "
+            "based ONLY on the provided context below. "
+            "Always mention the source file path if the answer is found. "
+            "Do not mention unrelated sources. "
         )
 
         user_prompt = "\n".join([
@@ -230,7 +222,7 @@ class Answerer:
             **inputs,
             "streamer": streamer,
             "max_new_tokens": MAX_NEW_TOKENS,
-            "temperature": 0.3,
+            "temperature": 0.0,
             "do_sample": False,
             "pad_token_id": self.tokenizer.eos_token_id,
         }
@@ -269,10 +261,7 @@ class Answerer:
             self._raise_generation_error(generation_errors.get())
 
     def _generate(
-        self,
-        query: str,
-        context: str,
-        live: bool = True,
+        self, query: str, context: str, live: bool = True,
     ) -> str:
         answer = ""
 
@@ -322,7 +311,7 @@ class Answerer:
         with self.console.status("[black]Building context", spinner="shark"):
             context = self._context(msr)
 
-        query = self.translator.translate_to_english(self.query)
+        query = msr.question
 
         self.lm.logger.debug("Query:\n%s", query)
         self.lm.logger.debug("Context:\n%s", context)
@@ -339,64 +328,17 @@ class Answerer:
             answer=answer,
         )
 
-    def _search_dataset_if_missing(self, dataset_path: Path) -> Path:
-        if dataset_path.exists():
-            return dataset_path
-
-        self.lm.logger.info(
-            "Search results not found at %s, running search_dataset first",
-            dataset_path,
-        )
-
-        search_dataset_path = Path(DEFAULT_DATASET_PATH)
-        if not search_dataset_path.exists():
-            raise FileNotFoundError(
-                f"Dataset file does not exist: {search_dataset_path}"
-            )
-        if not search_dataset_path.is_file():
-            raise FileNotFoundError(
-                f"Dataset path is not a file: {search_dataset_path}"
-            )
-
-        try:
-            searcher = Searcher(
-                lm=self.lm,
-                console=self.console,
-                embedding_model=self.embedding_model,
-                translator=self.translator,
-                dataset_path=str(search_dataset_path),
-                save_directory=str(dataset_path.parent),
-                k=self.k,
-            )
-        except (ValidationError, ValueError) as e:
-            raise ValueError(f"Error with the arguments: {e}") from e
-        except (FileNotFoundError, NotADirectoryError) as e:
-            raise type(e)(f"Error with the arguments: {e}") from e
-
-        try:
-            searcher.search_dataset()
-        except ValidationError as e:
-            raise ValueError(f"Error while searching: {e}") from e
-        except (ValueError, FileNotFoundError, NotADirectoryError) as e:
-            raise type(e)(f"Error while searching: {e}") from e
-
-        generated_path = dataset_path.parent / search_dataset_path.name
-
-        if not generated_path.exists():
-            raise FileNotFoundError(
-                f"Search results were not generated: {generated_path}"
-            )
-
-        return generated_path
-
     def answer_dataset(self) -> None:
         self.lm.logger.debug(
             "Answering dataset %s with k=%d", self.dataset_path, self.k,
         )
 
         dataset_path = Path(self.dataset_path)
-        dataset_path = self._search_dataset_if_missing(dataset_path)
 
+        if not dataset_path.exists():
+            raise FileNotFoundError(
+                f"Student search results file does not exist: {dataset_path}"
+            )
         if not dataset_path.is_file():
             raise FileNotFoundError(
                 f"Student search results path is not a file: {dataset_path}"
@@ -443,9 +385,7 @@ class Answerer:
                 )
 
                 context = self._context(search_result)
-                query = self.translator.translate_to_english(
-                    search_result.question
-                )
+                query = search_result.question
 
                 self.lm.logger.debug("Query:\n%s", query)
                 self.lm.logger.debug("Context:\n%s", context)
