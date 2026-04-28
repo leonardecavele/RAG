@@ -35,8 +35,8 @@ from .services.translator import Translator
 
 class CLI:
     def index(
-        self, directory_path: str = DEFAULT_VLLM,
-        chunk_size: int = 2000, extensions: str = "*", idiot: bool = False,
+        self, directory_path: str = DEFAULT_VLLM, max_chunk_size: int = 2000,
+        extensions: str = "*", idiot: bool = False,
         level: str = "error", library_level: str = "error"
     ) -> None:
         self._init_logger(level, library_level)
@@ -47,7 +47,7 @@ class CLI:
                 lm=self.lm,
                 console=self.console,
                 extensions=extensions,
-                chunk_size=chunk_size,
+                chunk_size=max_chunk_size,
                 idiot=idiot,
             )
         except (ValidationError, ValueError) as e:

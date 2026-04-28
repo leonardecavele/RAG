@@ -89,7 +89,9 @@ class Searcher:
             load_corpus=True,
         )
 
-        corpus_size = len(self.retriever.corpus) if self.retriever.corpus else 0
+        corpus_size = len(
+            self.retriever.corpus
+        ) if self.retriever.corpus else 0
         if corpus_size == 0:
             raise ValueError("BM25 corpus is empty")
 

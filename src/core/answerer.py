@@ -212,7 +212,9 @@ class Answerer:
                 "MAX_INPUT_TOKENS, or using a smaller/quantized model."
             ) from error
 
-        raise RuntimeError(f"Error while generating answer: {error}") from error
+        raise RuntimeError(
+            f"Error while generating answer: {error}"
+        ) from error
 
     def generate_answer(
         self,
