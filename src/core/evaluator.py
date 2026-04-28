@@ -5,7 +5,10 @@ from typing import Any
 
 # extern
 from pydantic import ValidationError, validate_call
+from rich import box
 from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 # local
 from ..schemas.models import (
@@ -245,12 +248,15 @@ class Evaluator:
 
         recalls: dict[str, float] = {}
 
-        for k in (1, 3, 5, 10):
-            effective_k = min(k, self.k)
-            recalls[f"recall@{k}"] = self._recall_at_k(
+        max_k = min(self.k, student_results.k)
+        for recall_k in (1, 3, 5, 10):
+            if recall_k > max_k:
+                continue
+
+            recalls[f"recall@{recall_k}"] = self._recall_at_k(
                 expected_questions,
                 student_results,
-                effective_k,
+                recall_k,
             )
 
         total_questions = len(dataset.rag_questions)
@@ -271,9 +277,6 @@ class Evaluator:
             f"Total number of questions with student sources: "
             f"{questions_with_student_sources}"
         )
-        self.console.print()
-        self.console.print("Evaluation Results")
-        self.console.print("=" * 40)
         self.console.print(f"Questions evaluated: {questions_with_sources}")
 
         for name, score in recalls.items():
