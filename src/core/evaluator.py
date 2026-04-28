@@ -160,8 +160,26 @@ class Evaluator:
             if expected.file_path != retrieved.file_path:
                 continue
 
+            retrieved_length = self._range_length(retrieved)
+
+            if retrieved_length == 0:
+                continue
+
             overlap = self._overlap_length(expected, retrieved)
-            ratio = overlap / expected_length
+            union_start = min(
+                expected.first_character_index,
+                retrieved.first_character_index,
+            )
+            union_end = max(
+                expected.last_character_index,
+                retrieved.last_character_index,
+            )
+            union_length = max(0, union_end - union_start)
+
+            if union_length == 0:
+                continue
+
+            ratio = overlap / union_length
 
             if ratio >= OVERLAP_THRESHOLD:
                 return True
