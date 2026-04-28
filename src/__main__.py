@@ -33,4 +33,4 @@ def main() -> ErrorCode:
 
 
 if __name__ == "__main__":
-    sys.exit(main().value)
+    sys.exit(main())

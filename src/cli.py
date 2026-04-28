@@ -21,10 +21,12 @@ from .utils.logger import LoggerManager
 from .core.indexer import Indexer
 from .core.searcher import Searcher
 from .core.answerer import Answerer
+from .core.evaluator import Evaluator
 from .defines import (
     DEFAULT_VLLM, EMBEDDING_MODEL, DEFAULT_SAVE_DIRECTORY,
     DEFAULT_DATASET_PATH, CHROMA_DIRECTORY, LLM_MODEL, DEFAULT_RESULTS_PATH,
-    DEFAULT_ANSWER_DIRECTORY
+    DEFAULT_ANSWER_DIRECTORY, DEFAULT_STUDENT_ANSWER_PATH, DEFAULT_CHUNK_SIZE,
+    DEFAULT_ANSWERED_QUESTIONS_PATH
 )
 from .display.results import print_msr
 from .services.translator import Translator
@@ -183,6 +185,37 @@ class CLI:
             raise ValueError(f"Error while answering: {e}") from e
         except (ValueError, FileNotFoundError, NotADirectoryError) as e:
             raise type(e)(f"Error while answering: {e}") from e
+
+    def evaluate(
+        self,
+        student_answer_path: str = DEFAULT_STUDENT_ANSWER_PATH,
+        dataset_path: str = DEFAULT_ANSWERED_QUESTIONS_PATH,
+        k: int = 5, max_context_length: int = DEFAULT_CHUNK_SIZE,
+        level: str = "error", library_level: str = "error",
+    ) -> None:
+        self._init_logger(level, library_level)
+        self._init_console()
+
+        try:
+            evaluator = Evaluator(
+                lm=self.lm,
+                console=self.console,
+                student_answer_path=student_answer_path,
+                dataset_path=dataset_path,
+                k=k,
+                max_context_length=max_context_length,
+            )
+        except (ValidationError, ValueError) as e:
+            raise ValueError(f"Error with the arguments: {e}") from e
+        except (FileNotFoundError, NotADirectoryError) as e:
+            raise type(e)(f"Error with the arguments: {e}") from e
+
+        try:
+            evaluator.evaluate()
+        except ValidationError as e:
+            raise ValueError(f"Error while evaluating: {e}") from e
+        except (ValueError, FileNotFoundError, NotADirectoryError) as e:
+            raise type(e)(f"Error while evaluating: {e}") from e
 
     def _called_from(self, function_name: str) -> bool:
         frame = inspect.currentframe()

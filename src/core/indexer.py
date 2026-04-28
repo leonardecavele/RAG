@@ -33,6 +33,7 @@ from ..defines import (
     MANIFEST_PATH,
     MAX_BATCH_SIZE,
     EMBEDDING_MODEL,
+    DEFAULT_CHUNK_SIZE
 )
 from ..schemas.models import ChunkMetadata
 from ..schemas.manifest import Manifest
@@ -46,7 +47,7 @@ class Indexer:
         lm: LoggerManager,
         console: Console,
         extensions: str = "*",
-        chunk_size: PositiveInt = 2000,
+        chunk_size: PositiveInt = DEFAULT_CHUNK_SIZE,
         idiot: bool = False,
     ) -> None:
         self.directory_path = Path(directory_path)
