@@ -190,11 +190,11 @@ class CLI:
         self,
         student_answer_path: str = DEFAULT_STUDENT_ANSWER_PATH,
         dataset_path: str = DEFAULT_ANSWERED_QUESTIONS_PATH,
-        k: int = 5, max_context_length: int = DEFAULT_CHUNK_SIZE,
-        level: str = "error", library_level: str = "error",
+        k: int = 5, level: str = "error", library_level: str = "error"
     ) -> None:
         self._init_logger(level, library_level)
         self._init_console()
+        self._init_models()
 
         try:
             evaluator = Evaluator(
@@ -202,8 +202,8 @@ class CLI:
                 console=self.console,
                 student_answer_path=student_answer_path,
                 dataset_path=dataset_path,
-                k=k,
-                max_context_length=max_context_length,
+                translator=self.translator,
+                k=k
             )
         except (ValidationError, ValueError) as e:
             raise ValueError(f"Error with the arguments: {e}") from e
@@ -258,7 +258,7 @@ class CLI:
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        if CHROMA_DIRECTORY.exists():
+        if CHROMA_DIRECTORY.exists() and not self._called_from("evaluate"):
             self.embedding_model = SentenceTransformer(
                 EMBEDDING_MODEL,
                 device=device,

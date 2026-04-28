@@ -5,10 +5,7 @@ from typing import Any
 
 # extern
 from pydantic import ValidationError, validate_call
-from rich import box
 from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
 
 # local
 from ..schemas.models import (
@@ -18,10 +15,7 @@ from ..schemas.models import (
     StudentSearchResults,
 )
 from ..utils.logger import LoggerManager
-from ..defines import (
-    DEFAULT_CHUNK_SIZE,
-    DEFAULT_UNANSWERED_QUESTIONS_PATH,
-)
+from ..defines import DEFAULT_UNANSWERED_QUESTIONS_PATH
 from ..services.translator import Translator
 from .searcher import Searcher
 
@@ -29,33 +23,21 @@ from .searcher import Searcher
 OVERLAP_THRESHOLD: float = 0.05
 
 
-class _PassthroughTranslator(Translator):
-    def __init__(self) -> None:
-        pass
-
-    def translate_to_english(self, text: str) -> str:
-        return " ".join(text.split())
-
-
 class Evaluator:
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
-        self, lm: LoggerManager, console: Console,
-        student_answer_path: str, dataset_path: str,
-        k: int = 5, max_context_length: int = DEFAULT_CHUNK_SIZE,
+        self, lm: LoggerManager, console: Console, translator: Translator,
+        student_answer_path: str, dataset_path: str, k: int = 5
     ) -> None:
         if k <= 0:
             raise ValueError("k must be greater than 0")
-
-        if max_context_length <= 0:
-            raise ValueError("max_context_length must be greater than 0")
 
         self.lm = lm
         self.console = console
         self.student_answer_path = Path(student_answer_path)
         self.dataset_path = Path(dataset_path)
         self.k = k
-        self.max_context_length = max_context_length
+        self.translator = translator
 
     @staticmethod
     def _load_json(path: Path) -> Any:
@@ -116,7 +98,7 @@ class Evaluator:
             lm=self.lm,
             console=self.console,
             embedding_model=None,
-            translator=_PassthroughTranslator(),
+            translator=self.translator,
             dataset_path=str(dataset_path),
             save_directory=str(save_directory),
             k=self.k,
@@ -132,20 +114,7 @@ class Evaluator:
     @staticmethod
     def _range_length(source: MinimalSource) -> int:
         return max(
-            0,
-            source.last_character_index - source.first_character_index,
-        )
-
-    def _limited_source(self, source: MinimalSource) -> MinimalSource:
-        end = min(
-            source.last_character_index,
-            source.first_character_index + self.max_context_length,
-        )
-
-        return MinimalSource(
-            file_path=source.file_path,
-            first_character_index=source.first_character_index,
-            last_character_index=end,
+            0, source.last_character_index - source.first_character_index
         )
 
     @staticmethod
@@ -165,9 +134,7 @@ class Evaluator:
         return max(0, end - start)
 
     def _source_found(
-        self,
-        expected: MinimalSource,
-        retrieved_sources: list[MinimalSource],
+        self, expected: MinimalSource, retrieved_sources: list[MinimalSource]
     ) -> bool:
         expected_length = self._range_length(expected)
 
@@ -175,8 +142,6 @@ class Evaluator:
             return False
 
         for retrieved in retrieved_sources:
-            retrieved = self._limited_source(retrieved)
-
             if expected.file_path != retrieved.file_path:
                 continue
 
@@ -202,11 +167,11 @@ class Evaluator:
             if self._source_found(expected_source, retrieved_sources):
                 found += 1
 
-        return found / len(expected.sources)
+        return float(found)
 
     @staticmethod
     def _answered_questions(
-        dataset: RagDataset,
+        dataset: RagDataset
     ) -> dict[str, AnsweredQuestion]:
         questions: dict[str, AnsweredQuestion] = {}
 
