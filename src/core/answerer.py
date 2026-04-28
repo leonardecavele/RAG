@@ -54,8 +54,7 @@ class Answerer:
         k: int = 5,
         dataset_path: str = DEFAULT_DATASET_PATH,
         save_directory: str = DEFAULT_ANSWER_DIRECTORY,
-        question_id: str = "",
-        search_dataset_path: str = DEFAULT_DATASET_PATH,
+        question_id: str = ""
     ) -> None:
         self.lm = lm
         self.console = console
@@ -78,7 +77,6 @@ class Answerer:
         self.save_directory = save_directory
         self.k = k
         self.question_id = question_id
-        self.search_dataset_path = search_dataset_path
 
     def _should_show_progress(self) -> bool:
         return (
@@ -395,7 +393,7 @@ class Answerer:
             dataset_path,
         )
 
-        search_dataset_path = Path(self.search_dataset_path)
+        search_dataset_path = Path(DEFAULT_DATASET_PATH)
         if not search_dataset_path.exists():
             raise FileNotFoundError(
                 f"Dataset file does not exist: {search_dataset_path}"
