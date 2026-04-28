@@ -128,9 +128,9 @@ class Evaluator:
 
     @staticmethod
     def _range_length(source: MinimalSource) -> int:
-        return max(
+        return int(max(
             0, source.last_character_index - source.first_character_index
-        )
+        ))
 
     @staticmethod
     def _overlap_length(
@@ -146,7 +146,7 @@ class Evaluator:
             retrieved.last_character_index,
         )
 
-        return max(0, end - start)
+        return int(max(0, end - start))
 
     def _source_found(
         self, expected: MinimalSource, retrieved_sources: list[MinimalSource]

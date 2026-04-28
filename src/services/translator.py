@@ -18,7 +18,7 @@ class Translator:
 
     def _is_english(self, text: str) -> bool:
         try:
-            return detect(text) == "en"
+            return bool(detect(text) == "en")
         except LangDetectException:
             return True
 

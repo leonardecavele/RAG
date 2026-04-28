@@ -95,19 +95,19 @@ class Answerer:
 
         metadata_by_source: dict[tuple[str, int, int], dict[str, Any]] = {}
 
-        for md in chunks_metadata.values():
+        for chunk_metadata in chunks_metadata.values():
             try:
                 key = (
-                    md["file_path"],
-                    md["first_character_index"],
-                    md["last_character_index"],
+                    chunk_metadata["file_path"],
+                    chunk_metadata["first_character_index"],
+                    chunk_metadata["last_character_index"],
                 )
             except KeyError as e:
                 raise ValueError(
                     f"Invalid chunk metadata: missing {e}"
                 ) from e
 
-            metadata_by_source[key] = md
+            metadata_by_source[key] = chunk_metadata
 
         for index, source in enumerate(msr.retrieved_sources, start=1):
             key = (

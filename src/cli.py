@@ -1,5 +1,4 @@
 # standard
-import logging
 import inspect
 
 # extern
@@ -25,7 +24,7 @@ from .core.evaluator import Evaluator
 from .defines import (
     DEFAULT_VLLM, EMBEDDING_MODEL, DEFAULT_SAVE_DIRECTORY,
     DEFAULT_DATASET_PATH, CHROMA_DIRECTORY, LLM_MODEL, DEFAULT_RESULTS_PATH,
-    DEFAULT_ANSWER_DIRECTORY, DEFAULT_STUDENT_ANSWER_PATH, DEFAULT_CHUNK_SIZE,
+    DEFAULT_ANSWER_DIRECTORY, DEFAULT_STUDENT_ANSWER_PATH,
     DEFAULT_ANSWERED_QUESTIONS_PATH
 )
 from .display.results import print_msr
