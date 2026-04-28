@@ -27,7 +27,8 @@ from .core.searcher import Searcher
 from .core.answerer import Answerer
 from .defines import (
     DEFAULT_VLLM, EMBEDDING_MODEL, DEFAULT_SAVE_DIRECTORY,
-    DEFAULT_DATASET_PATH, CHROMA_DIRECTORY, LLM_MODEL, DEFAULT_RESULTS_PATH
+    DEFAULT_DATASET_PATH, CHROMA_DIRECTORY, LLM_MODEL, DEFAULT_RESULTS_PATH,
+    DEFAULT_ANSWER_DIRECTORY
 )
 from .display.results import print_msr
 from .services.translator import Translator
@@ -156,7 +157,7 @@ class CLI:
 
     def answer_dataset(
         self, student_search_results_path: str = DEFAULT_RESULTS_PATH,
-        save_directory: str = DEFAULT_SAVE_DIRECTORY, k: int = 5,
+        save_directory: str = DEFAULT_ANSWER_DIRECTORY, k: int = 5,
         level: str = "error", library_level: str = "error"
     ) -> None:
         self._init_logger(level, library_level)

@@ -22,9 +22,7 @@ from transformers import TextIteratorStreamer
 
 # local
 from ..defines import (
-    DEFAULT_DATASET_PATH,
-    DEFAULT_SAVE_DIRECTORY,
-    CHUNKS_METADATA_PATH,
+    DEFAULT_ANSWER_DIRECTORY, DEFAULT_DATASET_PATH, CHUNKS_METADATA_PATH
 )
 from ..utils.logger import LoggerManager
 from ..schemas.models import (
@@ -55,7 +53,7 @@ class Answerer:
         query: str = "",
         k: int = 5,
         dataset_path: str = DEFAULT_DATASET_PATH,
-        save_directory: str = DEFAULT_SAVE_DIRECTORY,
+        save_directory: str = DEFAULT_ANSWER_DIRECTORY,
         question_id: str = "",
         search_dataset_path: str = DEFAULT_DATASET_PATH,
     ) -> None:

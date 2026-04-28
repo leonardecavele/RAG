@@ -28,5 +28,8 @@ DEFAULT_SAVE_DIRECTORY: str = (
     "data/output/search_results"
 )
 DEFAULT_RESULTS_PATH: str = (
-    "data/output/search_results/dataset_docs_public.json"
+    "data/output/search_results/dataset_code_public.json"
+)
+DEFAULT_ANSWER_DIRECTORY: str = (
+    "data/output/search_results_and_answer"
 )
