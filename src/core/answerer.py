@@ -35,7 +35,7 @@ from .searcher import Searcher
 
 
 MAX_INPUT_TOKENS: int = 4096
-MAX_NEW_TOKENS: int = 80
+MAX_NEW_TOKENS: int = 128
 STREAMER_TIMEOUT: float = 1.0
 
 
@@ -76,10 +76,11 @@ class Answerer:
         self.save_directory = save_directory
         self.k = k
         self.question_id = question_id
+        self.metadata_by_source = self._load_metadata_by_source()
 
-    def _context(self, msr: MinimalSearchResults) -> str:
-        contexts: list[str] = []
-
+    def _load_metadata_by_source(
+        self
+    ) -> dict[tuple[str, int, int], dict[str, Any]]:
         try:
             with open(CHUNKS_METADATA_PATH, "r", encoding="utf-8") as f:
                 chunks_metadata: dict[str, dict[str, Any]] = json.load(f)
@@ -109,13 +110,18 @@ class Answerer:
 
             metadata_by_source[key] = chunk_metadata
 
+        return metadata_by_source
+
+    def _context(self, msr: MinimalSearchResults) -> str:
+        contexts: list[str] = []
+
         for index, source in enumerate(msr.retrieved_sources, start=1):
             key = (
                 source.file_path,
                 source.first_character_index,
                 source.last_character_index,
             )
-            md = metadata_by_source.get(key)
+            md = self.metadata_by_source.get(key)
 
             if md is None:
                 raise ValueError(
@@ -133,7 +139,7 @@ class Answerer:
             contexts.append(
                 "\n".join([
                     f"[Source {index}] {source.file_path} "
-                    f"({source.first_character_index}- "
+                    f"({source.first_character_index}-"
                     f"{source.last_character_index})",
                     snippet,
                 ])
@@ -177,14 +183,18 @@ class Answerer:
             return
 
         system_prompt = (
-            "Answer in 1 to 4 sentences. "
-            "based ONLY on the provided context below. "
-            "Always mention the source file path if the answer is found. "
+            "Answer based ONLY on the provided context. "
+            "Give a concise answer in 1 to 3 sentences. "
+            "If a command answers the question, give the command first. "
+            "Mention only the source file path that supports the answer. "
             "Do not mention unrelated sources. "
+            "Do not add explanations that are not required. "
+            "Always finish with a complete sentence."
         )
 
         user_prompt = "\n".join([
-            "Context:", context, "", "Question:", query,
+            "Context:", context, "", "Question:", query, "",
+            "Answer in 1 to 3 concise sentences.",
         ])
 
         messages = [
@@ -222,9 +232,9 @@ class Answerer:
             **inputs,
             "streamer": streamer,
             "max_new_tokens": MAX_NEW_TOKENS,
-            "temperature": 0.0,
             "do_sample": False,
             "pad_token_id": self.tokenizer.eos_token_id,
+            "eos_token_id": self.tokenizer.eos_token_id
         }
 
         generation_errors: Queue[BaseException] = Queue()
