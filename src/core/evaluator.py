@@ -15,9 +15,6 @@ from ..schemas.models import (
     StudentSearchResults,
 )
 from ..utils.logger import LoggerManager
-from ..defines import DEFAULT_UNANSWERED_QUESTIONS_PATH
-from ..services.translator import Translator
-from .searcher import Searcher
 
 
 OVERLAP_THRESHOLD: float = 0.05
@@ -26,7 +23,7 @@ OVERLAP_THRESHOLD: float = 0.05
 class Evaluator:
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
-        self, lm: LoggerManager, console: Console, translator: Translator,
+        self, lm: LoggerManager, console: Console,
         student_answer_path: str, dataset_path: str, k: int = 5
     ) -> None:
         if k <= 0:
@@ -37,7 +34,6 @@ class Evaluator:
         self.student_answer_path = Path(student_answer_path)
         self.dataset_path = Path(dataset_path)
         self.k = k
-        self.translator = translator
 
     @staticmethod
     def _load_json(path: Path) -> Any:
@@ -73,58 +69,6 @@ class Evaluator:
                 f"Invalid student results format: "
                 f"{self.student_answer_path}"
             ) from e
-
-    def _unanswered_dataset_path(self) -> Path:
-        path = Path(str(self.dataset_path).replace(
-            "AnsweredQuestions",
-            "UnansweredQuestions",
-        ))
-
-        if path.exists():
-            return path
-
-        return Path(DEFAULT_UNANSWERED_QUESTIONS_PATH)
-
-    def _generate_student_results(self) -> None:
-        dataset_path = self._unanswered_dataset_path()
-        save_directory = self.student_answer_path.parent
-
-        self.console.print(
-            f"Student results file not found: {self.student_answer_path}"
-        )
-        self.console.print("Running search_dataset first")
-
-        try:
-            searcher = Searcher(
-                lm=self.lm,
-                console=self.console,
-                embedding_model=None,
-                translator=self.translator,
-                dataset_path=str(dataset_path),
-                save_directory=str(save_directory),
-                k=self.k,
-            )
-
-            searcher.search_dataset()
-
-        except (ValidationError, ValueError) as e:
-            raise ValueError(
-                f"Error while generating search results: {e}"
-            ) from e
-
-        except (FileNotFoundError, NotADirectoryError) as e:
-            raise type(e)(
-                f"Error while generating search results: {e}"
-            ) from e
-
-        generated_path = save_directory / dataset_path.name
-
-        if not generated_path.exists():
-            raise FileNotFoundError(
-                f"Search results were not generated: {generated_path}"
-            )
-
-        self.student_answer_path = generated_path
 
     @staticmethod
     def _range_length(source: MinimalSource) -> int:
@@ -241,9 +185,6 @@ class Evaluator:
         return total_found / total_expected_sources
 
     def evaluate(self) -> dict[str, float]:
-        if not self.student_answer_path.exists():
-            self._generate_student_results()
-
         dataset = self._load_dataset()
         student_results = self._load_student_results()
         expected_questions = self._answered_questions(dataset)

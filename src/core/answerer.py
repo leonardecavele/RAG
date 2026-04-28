@@ -35,7 +35,7 @@ from .searcher import Searcher
 
 
 MAX_INPUT_TOKENS: int = 4096
-MAX_NEW_TOKENS: int = 512
+MAX_NEW_TOKENS: int = 128
 STREAMER_TIMEOUT: float = 1.0
 
 
@@ -231,7 +231,7 @@ class Answerer:
             "streamer": streamer,
             "max_new_tokens": MAX_NEW_TOKENS,
             "temperature": 0.3,
-            "do_sample": True,
+            "do_sample": False,
             "pad_token_id": self.tokenizer.eos_token_id,
         }
 

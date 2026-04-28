@@ -201,7 +201,6 @@ class CLI:
                 console=self.console,
                 student_answer_path=student_answer_path,
                 dataset_path=dataset_path,
-                translator=self.translator,
                 k=k
             )
         except (ValidationError, ValueError) as e:
