@@ -1,10 +1,10 @@
-# extern imports
+# extern
 from rich.console import Console
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
 
-# local imports
+# local
 from ..schemas.models import MinimalSearchResults
 
 

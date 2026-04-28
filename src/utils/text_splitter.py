@@ -1,8 +1,8 @@
-# standard imports
+# standard
 from pathlib import Path
 from typing import Any
 
-# extern imports
+# extern
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 
 

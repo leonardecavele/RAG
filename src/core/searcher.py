@@ -1,11 +1,11 @@
-# standard imports
+# standard
 import json
 import logging
 import uuid
 from pathlib import Path
 from typing import Any
 
-# extern imports
+# extern
 import bm25s
 import chromadb
 from pydantic import ValidationError, validate_call
@@ -19,7 +19,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-# local imports
+# local
 from ..defines import (
     BM25_DIRECTORY,
     CHROMA_DIRECTORY,

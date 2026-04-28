@@ -1,4 +1,4 @@
-# standard import
+# standard
 import re
 import json
 import shutil
@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-# extern imports
+# extern
 import bm25s
 import chromadb
 from rich.console import Console
@@ -25,7 +25,7 @@ from pydantic import (
     Field, ValidationError, ConfigDict
 )
 
-# local imports
+# local
 from ..utils.text_splitter import TextSplitter
 from ..utils.logger import LoggerManager
 from ..utils.hash import md5sum, file_md5sum

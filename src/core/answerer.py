@@ -1,4 +1,4 @@
-# standard imports
+# standard
 import json
 import logging
 from pathlib import Path
@@ -6,7 +6,7 @@ from queue import Empty, Queue
 from threading import Thread
 from typing import Any, Generator
 
-# extern imports
+# extern
 import torch
 from pydantic import ValidationError, validate_call
 from rich.console import Console
@@ -20,7 +20,7 @@ from rich.progress import (
 from rich.text import Text
 from transformers import TextIteratorStreamer
 
-# local imports
+# local
 from ..defines import (
     DEFAULT_DATASET_PATH,
     DEFAULT_SAVE_DIRECTORY,

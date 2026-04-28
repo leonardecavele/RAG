@@ -1,7 +1,7 @@
-# standard imports
+# standard
 import uuid
 
-# extern imports
+# extern
 from pydantic import BaseModel, Field
 
 

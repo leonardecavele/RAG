@@ -1,10 +1,10 @@
-# standard imports
+# standard
 import os
 import sys
 import logging
 import inspect
 
-# extern imports
+# extern
 import fire
 import torch
 from rich.console import Console
@@ -19,7 +19,7 @@ from pydantic import ValidationError, TypeAdapter, PositiveInt
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# local imports
+# local
 from .error import ErrorCode, print_validation_error, error_code
 from .utils.logger import LoggerManager
 from .core.indexer import Indexer
