@@ -45,6 +45,8 @@ CANDIDATE_MULTIPLIER: int = 42
 
 
 class Searcher:
+    """Search indexed chunks with BM25 and optional Chroma ranking."""
+
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
         self,
@@ -58,6 +60,8 @@ class Searcher:
         k: int = 5,
         question_id: str = "",
     ) -> None:
+        """Initialize search dependencies and retrieval limits."""
+
         self.lm = lm
         self.console = console
 
@@ -106,6 +110,8 @@ class Searcher:
         self.save_directory = save_directory
 
     def _bm25_ids(self, show_progress: bool = False) -> list[str]:
+        """Return candidate chunk IDs from BM25."""
+
         query_tokens = bm25s.tokenize(
             self.translated_query, show_progress=show_progress,
         )
@@ -117,6 +123,8 @@ class Searcher:
         return [result["id"] for result in results[0]]
 
     def _chroma_ids(self) -> list[str]:
+        """Return candidate chunk IDs from Chroma."""
+
         client = chromadb.PersistentClient(path=str(CHROMA_DIRECTORY))
         collection = client.get_collection(name="chunks")
 
@@ -134,6 +142,8 @@ class Searcher:
 
     @staticmethod
     def _rrf(rankings: list[tuple[list[str], float]]) -> list[str]:
+        """Merge rankings with reciprocal rank fusion."""
+
         scores: dict[str, float] = {}
 
         for ranking, weight in rankings:
@@ -153,6 +163,8 @@ class Searcher:
         show_progress: bool = True,
         show_bm25_progress: bool = False
     ) -> MinimalSearchResults:
+        """Search for sources that answer the current query."""
+
         self.lm.logger.debug("Searching %r with k=%d", self.query, self.k)
 
         ids: list[tuple[list[str], float]] = []
@@ -268,6 +280,8 @@ class Searcher:
         )
 
     def search_dataset(self) -> None:
+        """Search every question in a dataset and save results."""
+
         self.lm.logger.debug(
             "Searching in %s with k=%d", self.dataset_path, self.k,
         )

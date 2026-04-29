@@ -11,6 +11,8 @@ from ..schemas.models import MinimalSearchResults
 def print_msr(
     console: Console, msr: MinimalSearchResults, query: str
 ) -> None:
+    """Print minimal search results to the console."""
+
     console.print()
     console.print(
         Rule(

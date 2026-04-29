@@ -12,6 +12,8 @@ from .error import ErrorCode, print_validation_error, error_code
 
 
 def main() -> ErrorCode:
+    """Run the command-line application."""
+
     os.environ.setdefault("PAGER", "cat")
 
     try:

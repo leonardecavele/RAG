@@ -3,3 +3,4 @@
 dist
 *.pdf
 data
+.codex

@@ -7,6 +7,8 @@ from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 
 
 class TextSplitter(RecursiveCharacterTextSplitter):
+    """Choose recursive split separators from file language."""
+
     _EXTENSIONS = {
         ".cpp": Language.CPP,
         ".hpp": Language.CPP,
@@ -57,6 +59,8 @@ class TextSplitter(RecursiveCharacterTextSplitter):
 
     @classmethod
     def from_extension(cls, extension: str, **kwargs: Any) -> "TextSplitter":
+        """Create a splitter for a file extension."""
+
         if not extension.startswith("."):
             extension = f".{extension}"
         extension = extension.lower()
@@ -65,10 +69,14 @@ class TextSplitter(RecursiveCharacterTextSplitter):
 
     @classmethod
     def from_filename(cls, filename: str, **kwargs: Any) -> "TextSplitter":
+        """Create a splitter for a filename."""
+
         ext: str = Path(filename).suffix
         return cls.from_extension(ext, **kwargs)
 
     def __init__(self, language: Language | None, **kwargs: Any) -> None:
+        """Initialize the splitter for a language."""
+
         separators = (
             self.get_separators_for_language(language) if language else None
         )

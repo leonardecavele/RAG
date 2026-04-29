@@ -21,11 +21,15 @@ OVERLAP_THRESHOLD: float = 0.05
 
 
 class Evaluator:
+    """Evaluate retrieved sources against an answered dataset."""
+
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
         self, lm: LoggerManager, console: Console,
         student_answer_path: str, dataset_path: str, k: int = 5
     ) -> None:
+        """Initialize evaluator paths and recall limit."""
+
         if k <= 0:
             raise ValueError("k must be greater than 0")
 
@@ -37,6 +41,8 @@ class Evaluator:
 
     @staticmethod
     def _load_json(path: Path) -> Any:
+        """Load and validate a JSON file."""
+
         if not path.exists():
             raise FileNotFoundError(f"File does not exist: {path}")
 
@@ -50,6 +56,8 @@ class Evaluator:
             raise ValueError(f"Invalid JSON file: {path}") from e
 
     def _load_dataset(self) -> RagDataset:
+        """Load the expected answer dataset."""
+
         try:
             return RagDataset.model_validate(
                 self._load_json(self.dataset_path)
@@ -60,6 +68,8 @@ class Evaluator:
             ) from e
 
     def _load_student_results(self) -> StudentSearchResults:
+        """Load student search results."""
+
         try:
             return StudentSearchResults.model_validate(
                 self._load_json(self.student_answer_path)
@@ -72,6 +82,8 @@ class Evaluator:
 
     @staticmethod
     def _range_length(source: MinimalSource) -> int:
+        """Return the non-negative character range length."""
+
         return int(max(
             0, source.last_character_index - source.first_character_index
         ))
@@ -81,6 +93,8 @@ class Evaluator:
         expected: MinimalSource,
         retrieved: MinimalSource,
     ) -> int:
+        """Return the overlap length between two source ranges."""
+
         start = max(
             expected.first_character_index,
             retrieved.first_character_index,
@@ -95,6 +109,8 @@ class Evaluator:
     def _source_found(
         self, expected: MinimalSource, retrieved_sources: list[MinimalSource]
     ) -> bool:
+        """Return whether an expected source overlaps a retrieved one."""
+
         expected_length = self._range_length(expected)
 
         if expected_length == 0:
@@ -135,6 +151,8 @@ class Evaluator:
         expected: AnsweredQuestion,
         retrieved_sources: list[MinimalSource],
     ) -> float:
+        """Count expected sources found for one question."""
+
         if not expected.sources:
             return 0.0
 
@@ -150,6 +168,8 @@ class Evaluator:
     def _answered_questions(
         dataset: RagDataset
     ) -> dict[str, AnsweredQuestion]:
+        """Return answered dataset questions by ID."""
+
         questions: dict[str, AnsweredQuestion] = {}
 
         for question in dataset.rag_questions:
@@ -164,6 +184,8 @@ class Evaluator:
         student_results: StudentSearchResults,
         k: int,
     ) -> float:
+        """Calculate source recall at a cutoff."""
+
         total_expected_sources = sum(
             len(question.sources)
             for question in expected_questions.values()
@@ -185,6 +207,8 @@ class Evaluator:
         return total_found / total_expected_sources
 
     def evaluate(self) -> dict[str, float]:
+        """Evaluate student results and print recall metrics."""
+
         dataset = self._load_dataset()
         student_results = self._load_student_results()
         expected_questions = self._answered_questions(dataset)

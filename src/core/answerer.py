@@ -40,6 +40,8 @@ STREAMER_TIMEOUT: float = 1.0
 
 
 class Answerer:
+    """Generate answers from retrieved source context."""
+
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
         self,
@@ -55,6 +57,8 @@ class Answerer:
         save_directory: str = DEFAULT_ANSWER_DIRECTORY,
         question_id: str = ""
     ) -> None:
+        """Initialize answer generation dependencies."""
+
         self.lm = lm
         self.console = console
         self.embedding_model = embedding_model
@@ -81,6 +85,8 @@ class Answerer:
     def _load_metadata_by_source(
         self
     ) -> dict[tuple[str, int, int], dict[str, Any]]:
+        """Load chunk metadata keyed by source span."""
+
         try:
             with open(CHUNKS_METADATA_PATH, "r", encoding="utf-8") as f:
                 chunks_metadata: dict[str, dict[str, Any]] = json.load(f)
@@ -113,6 +119,8 @@ class Answerer:
         return metadata_by_source
 
     def _context(self, msr: MinimalSearchResults) -> str:
+        """Build prompt context from search results."""
+
         contexts: list[str] = []
 
         for index, source in enumerate(msr.retrieved_sources, start=1):
@@ -148,10 +156,14 @@ class Answerer:
         return "\n\n".join(contexts)
 
     def _input_device(self) -> Any:
+        """Return the device used by the language model."""
+
         return next(self.llm_model.parameters()).device
 
     @staticmethod
     def _is_cuda_oom(error: BaseException) -> bool:
+        """Return whether an exception indicates CUDA OOM."""
+
         return (
             isinstance(error, torch.OutOfMemoryError)
             or (
@@ -161,6 +173,8 @@ class Answerer:
         )
 
     def _raise_generation_error(self, error: BaseException) -> None:
+        """Raise a user-facing generation error."""
+
         if self._is_cuda_oom(error):
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -178,6 +192,8 @@ class Answerer:
     def generate_answer(
         self, query: str, context: str
     ) -> Generator[str, None, None]:
+        """Stream answer text for a query and context."""
+
         if not context.strip():
             yield "I could not find enough information to answer."
             return
@@ -240,6 +256,8 @@ class Answerer:
         generation_errors: Queue[BaseException] = Queue()
 
         def _generate() -> None:
+            """Run model generation in the background."""
+
             try:
                 with torch.inference_mode():
                     self.llm_model.generate(**generation_kwargs)
@@ -273,6 +291,8 @@ class Answerer:
     def _generate(
         self, query: str, context: str, live: bool = True,
     ) -> str:
+        """Generate a complete answer, optionally streaming it live."""
+
         answer = ""
 
         if not live:
@@ -294,6 +314,8 @@ class Answerer:
         return answer.strip()
 
     def answer(self) -> MinimalAnswer:
+        """Search for context and answer the configured query."""
+
         self.lm.logger.debug("Answering %r with k=%d", self.query, self.k)
 
         try:
@@ -339,6 +361,8 @@ class Answerer:
         )
 
     def answer_dataset(self) -> None:
+        """Answer every search result in a dataset and save output."""
+
         self.lm.logger.debug(
             "Answering dataset %s with k=%d", self.dataset_path, self.k,
         )

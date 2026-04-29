@@ -7,6 +7,8 @@ from pydantic import ValidationError
 
 
 class ErrorCode(IntEnum):
+    """Map application failure classes to process exit codes."""
+
     NO_ERROR = 0
     ARGS_ERROR = auto()
     FILE_ERROR = auto()
@@ -17,6 +19,8 @@ class ErrorCode(IntEnum):
 
 
 def error_code(error: Exception) -> ErrorCode:
+    """Return the exit code that matches an exception."""
+
     message = str(error)
 
     if isinstance(error, json.JSONDecodeError) or "Invalid JSON" in message:
@@ -44,6 +48,8 @@ def error_code(error: Exception) -> ErrorCode:
 
 
 def print_validation_error(error: ValidationError) -> None:
+    """Print the first validation error in a compact form."""
+
     errors = error.errors()
 
     if errors:

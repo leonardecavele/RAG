@@ -40,6 +40,8 @@ from ..schemas.manifest import Manifest
 
 
 class Indexer:
+    """Build BM25 and Chroma indexes for a directory."""
+
     @validate_call(config={"arbitrary_types_allowed": True})
     def __init__(
         self,
@@ -52,6 +54,8 @@ class Indexer:
         ),
         idiot: bool = False,
     ) -> None:
+        """Initialize indexing options and validate the source path."""
+
         self.directory_path = Path(directory_path)
 
         self.lm = lm
@@ -76,6 +80,8 @@ class Indexer:
 
     @staticmethod
     def _parse_extensions(extensions: str) -> set[str]:
+        """Parse a colon-separated extension filter."""
+
         if extensions.strip() == "*":
             return {"*"}
 
@@ -94,6 +100,8 @@ class Indexer:
         return parsed_extensions
 
     def _collect_files(self) -> list[Path]:
+        """Collect files matching the active extension filter."""
+
         files: list[Path] = []
 
         for path in self.directory_path.rglob("*"):
@@ -109,6 +117,8 @@ class Indexer:
         return files
 
     def _load_document(self, path: Path) -> Document:
+        """Load a UTF-8 file as a LangChain document."""
+
         content: str = path.read_text(encoding="utf-8", errors="strict")
         return Document(
             page_content=content,
@@ -119,6 +129,8 @@ class Indexer:
         self,
         files: list[Path],
     ) -> tuple[list[str], dict[str, dict[str, Any]], list[str]]:
+        """Split files into indexed chunks and metadata."""
+
         chunks_content: list[str] = []
         chunks_metadata: dict[str, dict[str, Any]] = {}
         chunks_ids: list[str] = []
@@ -195,6 +207,8 @@ class Indexer:
         chunks_content: list[str],
         chunks_ids: list[dict[str, str]],
     ) -> None:
+        """Create and persist the BM25 index."""
+
         if not chunks_content or not chunks_ids:
             raise ValueError("No chunks to index with BM25")
 
@@ -218,6 +232,8 @@ class Indexer:
         chunks_metadata: dict[str, dict[str, Any]],
         chunks_ids: list[str],
     ) -> tuple[list[str], list[str]]:
+        """Return chunks that need Chroma embeddings."""
+
         chroma_chunks_content: list[str] = []
         chroma_chunks_ids: list[str] = []
 
@@ -261,6 +277,8 @@ class Indexer:
         chunks_metadata: dict[str, dict[str, Any]],
         chunks_ids: list[str],
     ) -> int:
+        """Count Chroma chunks belonging to updated files."""
+
         count: int = 0
 
         for chunk_id in chunks_ids:
@@ -279,6 +297,8 @@ class Indexer:
         chunks_content: list[str],
         chunks_ids: list[str],
     ) -> None:
+        """Create or update the Chroma vector index."""
+
         if CHROMA_DIRECTORY.exists() and not CHROMA_DIRECTORY.is_dir():
             raise NotADirectoryError(
                 f"Chroma path is not a directory: {CHROMA_DIRECTORY}"
@@ -352,12 +372,16 @@ class Indexer:
         self,
         chunks_metadata: dict[str, dict[str, Any]],
     ) -> None:
+        """Persist chunk metadata to disk."""
+
         CHUNKS_METADATA_PATH.parent.mkdir(parents=True, exist_ok=True)
 
         with open(CHUNKS_METADATA_PATH, "w", encoding="utf-8") as f:
             json.dump(chunks_metadata, f)
 
     def _store_manifest(self) -> None:
+        """Persist the manifest to disk."""
+
         MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
 
         with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
@@ -370,6 +394,8 @@ class Indexer:
         chroma_added_chunks_count: int,
         chroma_updated_chunks_count: int,
     ) -> None:
+        """Print a summary of indexed and changed chunks."""
+
         self.console.print(
             "[cyan]BM25[/cyan] - "
             f"indexed: [bold]{bm25_indexed_count}[/bold]"
@@ -382,6 +408,8 @@ class Indexer:
         )
 
     def index_directory(self) -> None:
+        """Index the configured directory."""
+
         self.lm.logger.debug(
             "Indexing %s with chunk size %d",
             str(self.directory_path),

@@ -13,6 +13,8 @@ from .models import CachedFile
 
 
 class Manifest(BaseModel):
+    """Track indexed files and vector store membership."""
+
     model_config = ConfigDict(extra="forbid")
 
     chunk_size: int = Field(0, ge=0)
@@ -25,6 +27,8 @@ class Manifest(BaseModel):
 
     @staticmethod
     def existing_manifest_data() -> dict[str, Any]:
+        """Load existing manifest JSON data if it exists."""
+
         if not MANIFEST_PATH.exists():
             return {}
 
@@ -49,6 +53,8 @@ class Manifest(BaseModel):
         return manifest_data
 
     def _remove_extensions(self, extensions: set[str]) -> list[str]:
+        """Remove files for extensions outside the active set."""
+
         delete_chunks_ids: list[str] = []
 
         for ext in list(self.files_by_extensions.keys()):
@@ -64,6 +70,8 @@ class Manifest(BaseModel):
         return delete_chunks_ids
 
     def _remove_missing_files(self) -> list[str]:
+        """Remove manifest files that no longer exist on disk."""
+
         delete_chunks_ids: list[str] = []
 
         for ext in list(self.files_by_extensions.keys()):
@@ -87,6 +95,8 @@ class Manifest(BaseModel):
     def load(
         cls, chunk_size: int, extensions: set[str]
     ) -> tuple["Manifest", list[str]]:
+        """Load or create a manifest for the current index settings."""
+
         if not MANIFEST_PATH.exists():
             return cls(chunk_size=chunk_size, llm_model=EMBEDDING_MODEL), []
 
@@ -116,6 +126,8 @@ class Manifest(BaseModel):
         self, chunks_metadata: dict[str, dict[str, Any]],
         chunks_ids: list[str], store: str,
     ) -> None:
+        """Mark chunks as present in an index store."""
+
         for chunk_id in chunks_ids:
             metadata = chunks_metadata[chunk_id]
 
@@ -135,6 +147,8 @@ class Manifest(BaseModel):
     def sync_files(
         self, files: list[Path]
     ) -> tuple[list[str], set[str], set[str]]:
+        """Sync manifest entries with files collected from disk."""
+
         delete_chunks_ids: list[str] = []
         updated_files_ids: set[str] = set()
         new_files_ids: set[str] = set()

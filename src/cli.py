@@ -32,11 +32,15 @@ from .services.translator import Translator
 
 
 class CLI:
+    """Expose indexing, search, answer, and evaluation commands."""
+
     def index(
         self, directory_path: str = DEFAULT_VLLM, max_chunk_size: int = 2000,
         extensions: str = "*", idiot: bool = False,
         level: str = "error", library_level: str = "error"
     ) -> None:
+        """Index a source directory."""
+
         self._init_logger(level, library_level)
         self._init_console()
         try:
@@ -63,6 +67,8 @@ class CLI:
         self, query: str, k: int = 5,
         level: str = "error", library_level: str = "error"
     ) -> None:
+        """Search the index for a query."""
+
         self._init_logger(level, library_level)
         self._init_console()
         self._load_models()
@@ -93,6 +99,8 @@ class CLI:
         save_directory: str = DEFAULT_SAVE_DIRECTORY, k: int = 5,
         level: str = "error", library_level: str = "error"
     ) -> None:
+        """Search all questions from a dataset."""
+
         self._init_logger(level, library_level)
         self._init_console()
         self._load_models()
@@ -122,6 +130,8 @@ class CLI:
         self, query: str, k: int = 5,
         level: str = "error", library_level: str = "error"
     ) -> None:
+        """Answer a query with retrieved context."""
+
         query = TypeAdapter(str).validate_python(query)
         k = TypeAdapter(PositiveInt).validate_python(k)
 
@@ -157,6 +167,8 @@ class CLI:
         save_directory: str = DEFAULT_ANSWER_DIRECTORY, k: int = 5,
         level: str = "error", library_level: str = "error"
     ) -> None:
+        """Answer all questions in student search results."""
+
         self._init_logger(level, library_level)
         self._init_console()
         self._load_models()
@@ -191,6 +203,8 @@ class CLI:
         dataset_path: str = DEFAULT_ANSWERED_QUESTIONS_PATH,
         k: int = 5, level: str = "error", library_level: str = "error"
     ) -> None:
+        """Evaluate student answer retrieval metrics."""
+
         self._init_logger(level, library_level)
         self._init_console()
         self._init_models()
@@ -216,6 +230,8 @@ class CLI:
             raise type(e)(f"Error while evaluating: {e}") from e
 
     def _called_from(self, function_name: str) -> bool:
+        """Return whether the call stack contains a function name."""
+
         frame = inspect.currentframe()
 
         while frame is not None:
@@ -226,6 +242,8 @@ class CLI:
         return False
 
     def _load_models(self) -> None:
+        """Load models while displaying progress."""
+
         with Progress(
             SpinnerColumn("shark", style="cyan"),
             TextColumn("[black]{task.description}"),
@@ -237,11 +255,15 @@ class CLI:
             self._init_models()
 
     def _init_logger(self, level: str, library_level: str) -> None:
+        """Initialize application and library logging."""
+
         level = TypeAdapter(str).validate_python(level)
         self.lm: LoggerManager = LoggerManager(level)
         self.lm.library_level(library_level)
 
     def _init_console(self) -> None:
+        """Initialize the Rich console."""
+
         self.console = Console(
             theme=Theme({
                 "progress.elapsed": "red",
@@ -250,6 +272,8 @@ class CLI:
         )
 
     def _init_models(self) -> None:
+        """Initialize embedding, translation, and generation models."""
+
         self.embedding_model = None
         self.tokenizer = None
         self.llm_model = None

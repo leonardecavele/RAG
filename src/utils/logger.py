@@ -6,6 +6,8 @@ from rich.logging import RichHandler
 
 
 class LoggerManager:
+    """Configure application and library log levels."""
+
     LOG_LEVELS: dict[str, int] = {
         "debug": logging.DEBUG,
         "info": logging.INFO,
@@ -14,6 +16,8 @@ class LoggerManager:
     }
 
     def __init__(self, level: str = "error") -> None:
+        """Create a logger manager with the requested app level."""
+
         logging.basicConfig(
             level=logging.ERROR,
             format="%(message)s",
@@ -31,10 +35,14 @@ class LoggerManager:
         self.set(level)
 
     def set(self, level: str) -> None:
+        """Set the application logger level."""
+
         normalized: str = self.normalize_level(level)
         self.logger.setLevel(self.LOG_LEVELS[normalized])
 
     def library_level(self, level: str) -> None:
+        """Set log levels for non-application loggers."""
+
         normalized: str = self.normalize_level(level)
         log_level: int = self.LOG_LEVELS[normalized]
         app_log_level: int = self.logger.level
@@ -50,6 +58,8 @@ class LoggerManager:
         self.logger.setLevel(app_log_level)
 
     def normalize_level(self, level: str) -> str:
+        """Normalize and validate a log level name."""
+
         normalized: str = level.lower()
         if normalized not in self.LOG_LEVELS:
             raise ValueError(
