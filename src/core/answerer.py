@@ -37,6 +37,7 @@ from .searcher import Searcher
 MAX_INPUT_TOKENS: int = 4096
 MAX_NEW_TOKENS: int = 128
 STREAMER_TIMEOUT: float = 1.0
+UNKNOWN_ANSWER: str = "I could not find enough information to answer."
 
 
 class Answerer:
@@ -206,6 +207,10 @@ class Answerer:
             "Do not mention unrelated sources. "
             "Do not add explanations that are not required. "
             "Always finish with a complete sentence."
+            "If the question is not a real question, "
+            f"answer exactly: {UNKNOWN_ANSWER}. "
+            "If the context does not directly answer the question, "
+            f"answer exactly: {UNKNOWN_ANSWER}."
         )
 
         user_prompt = "\n".join([
