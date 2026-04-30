@@ -45,14 +45,14 @@ class CLI:
     ) -> None:
         """Index a source directory."""
 
-        self._init_logger(level, library_level)
+        self._init_logger(str(level), str(library_level))
         self._init_console()
         try:
             i = Indexer(
-                directory_path=directory_path,
+                directory_path=str(directory_path),
                 lm=self.lm,
                 console=self.console,
-                extensions=extensions,
+                extensions=str(extensions),
                 chunk_size=max_chunk_size,
                 idiot=idiot,
             )
@@ -73,13 +73,13 @@ class CLI:
     ) -> None:
         """Search the index for a query."""
 
-        self._init_logger(level, library_level)
+        self._init_logger(str(level), str(library_level))
         self._init_console()
         self._load_models()
 
         try:
             s = Searcher(
-                query=query,
+                query=str(query),
                 lm=self.lm,
                 console=self.console,
                 embedding_model=self.embedding_model,
@@ -105,7 +105,7 @@ class CLI:
     ) -> None:
         """Search all questions from a dataset."""
 
-        self._init_logger(level, library_level)
+        self._init_logger(str(level), str(library_level))
         self._init_console()
         self._load_models()
         try:
@@ -114,8 +114,8 @@ class CLI:
                 console=self.console,
                 embedding_model=self.embedding_model,
                 translator=self.translator,
-                dataset_path=dataset_path,
-                save_directory=save_directory,
+                dataset_path=str(dataset_path),
+                save_directory=str(save_directory),
                 k=k
             )
         except (ValidationError, ValueError) as e:
@@ -136,16 +136,13 @@ class CLI:
     ) -> None:
         """Answer a query with retrieved context."""
 
-        query = TypeAdapter(str).validate_python(query)
-        k = TypeAdapter(PositiveInt).validate_python(k)
-
-        self._init_logger(level, library_level)
+        self._init_logger(str(level), str(library_level))
         self._init_console()
         self._load_models()
 
         try:
             a = Answerer(
-                query=query,
+                query=str(query),
                 lm=self.lm,
                 console=self.console,
                 embedding_model=self.embedding_model,
@@ -173,7 +170,7 @@ class CLI:
     ) -> None:
         """Answer all questions in student search results."""
 
-        self._init_logger(level, library_level)
+        self._init_logger(str(level), str(library_level))
         self._init_console()
         self._load_models()
 
@@ -185,8 +182,8 @@ class CLI:
                 translator=self.translator,
                 tokenizer=self.tokenizer,
                 llm_model=self.llm_model,
-                dataset_path=student_search_results_path,
-                save_directory=save_directory,
+                dataset_path=str(student_search_results_path),
+                save_directory=str(save_directory),
                 k=k
             )
         except (ValidationError, ValueError) as e:
@@ -209,7 +206,7 @@ class CLI:
     ) -> None:
         """Evaluate student answer retrieval metrics."""
 
-        self._init_logger(level, library_level)
+        self._init_logger(str(level), str(library_level))
         self._init_console()
         self._init_models()
 
@@ -217,8 +214,8 @@ class CLI:
             evaluator = Evaluator(
                 lm=self.lm,
                 console=self.console,
-                student_answer_path=student_answer_path,
-                dataset_path=dataset_path,
+                student_answer_path=str(student_answer_path),
+                dataset_path=str(dataset_path),
                 k=k
             )
         except (ValidationError, ValueError) as e:
