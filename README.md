@@ -203,5 +203,4 @@ semantic similarity for documentation-style questions.
 
 AI was used as a support tool for README writing and project review: it helped
 summarize the implemented architecture, compare it with the subject, and improve
-the wording of the documentation. The code and technical choices remain the
-student's responsibility.
+the wording of the documentation.

@@ -1,5 +1,6 @@
 # standard
 import inspect
+from typing import cast, Any
 
 # extern
 import torch
@@ -14,6 +15,7 @@ from rich.progress import (
 from pydantic import ValidationError, TypeAdapter, PositiveInt
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.utils import logging as transformers_logging
 
 # local
 from .utils.logger import LoggerManager
@@ -29,6 +31,8 @@ from .defines import (
 )
 from .display.results import print_msr
 from .services.translator import Translator
+
+cast(Any, transformers_logging).disable_progress_bar()
 
 
 class CLI:
