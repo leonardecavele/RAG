@@ -1,8 +1,6 @@
 *This project has been created as part of the 42 curriculum by ldecavel*.
 
-# RAG
-
-## Description
+### Description
 
 This project is a local Retrieval-Augmented Generation system built to answer
 questions about the vLLM codebase.
@@ -13,7 +11,7 @@ The implementation follows the subject requirements while adding a few bonus
 features such as semantic search, hybrid retrieval, Reciprocal Rank Fusion and
 index caching.
 
-## Features
+### Features
 
 - Indexes the vLLM repository from `data/raw/vllm-0.10.1`.
 - Splits code and documentation into configurable chunks up to 2000 characters.
@@ -25,7 +23,7 @@ index caching.
 - Evaluates retrieval quality with recall@k.
 - Saves outputs using the Pydantic models required by the subject.
 
-## Project Structure
+### Project Structure
 
 ```text
 src/
@@ -42,7 +40,7 @@ data/
 └── output/      generated search and answer files
 ```
 
-## Instructions
+### Instructions
 
 The project uses `uv` and Python `3.13.13`.
 
@@ -108,7 +106,7 @@ Clean generated caches:
 make clean
 ```
 
-## System Architecture
+### System Architecture
 
 The pipeline is split into four main steps:
 
@@ -123,7 +121,7 @@ The pipeline is split into four main steps:
 5. `Evaluator` compares retrieved source ranges against the answered datasets and
    computes recall@k with the 5% overlap rule from the subject.
 
-## Chunking Strategy
+### Chunking Strategy
 
 Chunking uses LangChain's recursive text splitter with language-aware separators.
 Python, Markdown and many other source file extensions get dedicated separators;
@@ -159,7 +157,7 @@ from both stores, then merges rankings with Reciprocal Rank Fusion:
 This keeps exact keyword and code-symbol matching strong while still using
 semantic similarity for documentation-style questions.
 
-## Design Decisions
+### Design Decisions
 
 - `uv` is used for reproducible dependency management.
 - Python Fire provides the required CLI with simple command mapping.
@@ -171,7 +169,7 @@ semantic similarity for documentation-style questions.
   English codebase.
 - The local LLM prompt is short and source-grounded to reduce hallucinations.
 
-## Challenges
+### Challenges
 
 - Keeping source offsets correct after chunking was important for evaluation, so
   each chunk is mapped back to its original character range.
@@ -181,7 +179,7 @@ semantic similarity for documentation-style questions.
 - Local generation has limited context, so prompts are capped and answers are
   kept concise.
 
-## Bonus Implemented
+### Bonus Implemented
 
 - Semantic embeddings for retrieval.
 - Hybrid BM25 + Chroma retrieval.
@@ -189,7 +187,7 @@ semantic similarity for documentation-style questions.
 - Persistent index caching with manifest-based invalidation.
 - Query translation before retrieval.
 
-## Resources
+### Resources
 
 - 42 subject: `en.subject.pdf`
 - vLLM repository indexed in `data/raw/vllm-0.10.1`
